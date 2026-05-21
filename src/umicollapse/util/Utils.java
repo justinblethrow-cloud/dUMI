@@ -44,16 +44,59 @@ public class Utils{
     }
 
     public static BitSet toBitSet(String s){
-        BitSet res = new BitSet(s.length() * Read.ENCODING_LENGTH);
+        return toBitSet(s, 0, s.length());
+    }
 
-        for(int i = 0; i < s.length(); i++){
-            charSet(res, i, Read.ENCODING_MAP.get(s.charAt(i)));
+    public static BitSet toBitSet(CharSequence s, int start, int end){
+        BitSet res = new BitSet((end - start) * Read.ENCODING_LENGTH);
 
-            if(s.charAt(i) == Read.UNDETERMINED_CHAR)
-                charSetNBit(res, i);
+        for(int i = start; i < end; i++){
+            int value = encodeBase(s.charAt(i));
+            int idx = i - start;
+            res.setEncodedBase(idx, value);
         }
 
         return res;
+    }
+
+    public static boolean isUMIBase(char c){
+        switch(c){
+            case 'A':
+            case 'a':
+            case 'T':
+            case 't':
+            case 'C':
+            case 'c':
+            case 'G':
+            case 'g':
+            case 'N':
+            case 'n':
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public static int encodeBase(char c){
+        switch(c){
+            case 'A':
+            case 'a':
+                return 0b000;
+            case 'T':
+            case 't':
+                return 0b101;
+            case 'C':
+            case 'c':
+                return 0b110;
+            case 'G':
+            case 'g':
+                return 0b011;
+            case 'N':
+            case 'n':
+                return Read.UNDETERMINED;
+            default:
+                throw new IllegalArgumentException("Invalid UMI base: " + c);
+        }
     }
 
     public static String toString(BitSet a, int length){

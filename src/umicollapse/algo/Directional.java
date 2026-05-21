@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 
 import umicollapse.util.BitSet;
 import umicollapse.data.DataStructure;
@@ -17,9 +18,20 @@ import umicollapse.util.ClusterTracker;
 public class Directional implements Algorithm{
     @Override
     public List<Read> apply(Map<BitSet, ReadFreq> reads, DataStructure data, ClusterTracker tracker, int umiLength, int k, float percentage){
+        if(reads.size() == 1){
+            Map.Entry<BitSet, ReadFreq> only = reads.entrySet().iterator().next();
+
+            if(tracker.shouldTrack()){
+                tracker.addAll(Collections.singleton(only.getKey()), reads);
+                tracker.track(only.getKey(), only.getValue().read);
+            }
+
+            return Collections.singletonList(only.getValue().read);
+        }
+
         UmiFreq[] freq = new UmiFreq[reads.size()];
-        List<Read> res = new ArrayList<>();
-        Map<BitSet, Integer> m = new HashMap<>();
+        List<Read> res = new ArrayList<>(reads.size());
+        Map<BitSet, Integer> m = new HashMap<>(hashMapCapacity(reads.size()));
         int idx = 0;
 
         for(Map.Entry<BitSet, ReadFreq> e : reads.entrySet()){
@@ -40,6 +52,14 @@ public class Directional implements Algorithm{
         }
 
         return res;
+    }
+
+    private static int hashMapCapacity(int expectedSize){
+        if(expectedSize < 3)
+            return 4;
+
+        long capacity = ((long)expectedSize * 4L) / 3L + 1L;
+        return capacity > (1 << 30) ? (1 << 30) : (int)capacity;
     }
 
     private void visitAndRemove(BitSet u, Map<BitSet, ReadFreq> reads, DataStructure data, ClusterTracker tracker, int k, float percentage){

@@ -7,6 +7,7 @@ import htsjdk.samtools.SamReaderFactory;
 import htsjdk.samtools.SAMRecordIterator;
 import htsjdk.samtools.SAMFileWriter;
 import htsjdk.samtools.SAMFileWriterFactory;
+import htsjdk.samtools.SAMFileHeader;
 
 import java.util.Map;
 import java.util.HashMap;
@@ -29,6 +30,9 @@ import umicollapse.util.Utils;
 import static umicollapse.util.Utils.HASH_CONST;
 
 public class DeduplicateSAM{
+    private static final int MIN_ALIGN_MAP_CAPACITY = 1 << 16;
+    private static final int MAX_ALIGN_MAP_CAPACITY = 1 << 24;
+
     private int avgUMICount;
     private int maxUMICount;
     private int dedupedCount;
@@ -39,7 +43,7 @@ public class DeduplicateSAM{
 
         SamReader reader = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
         Writer writer = new Writer(in, out, reader, paired);
-        Map<Alignment, Map<BitSet, ReadFreq>> align = new HashMap<>(1 << 16);
+        Map<Alignment, Map<BitSet, ReadFreq>> align = new HashMap<>(estimatedAlignmentMapCapacity(in));
 
         umiLength = umiLengthParam;
         int totalReadCount = 0;
@@ -100,10 +104,12 @@ public class DeduplicateSAM{
                 );
             }
 
-            if(!align.containsKey(alignment))
-                align.put(alignment, new HashMap<BitSet, ReadFreq>(4));
-
             Map<BitSet, ReadFreq> umiRead = align.get(alignment);
+
+            if(umiRead == null){
+                umiRead = new HashMap<BitSet, ReadFreq>(4);
+                align.put(alignment, umiRead);
+            }
 
             Read read = new SAMRead(record);
             BitSet umi = read.getUMI(umiLength);
@@ -111,8 +117,9 @@ public class DeduplicateSAM{
             if(umiLength == -1)
                 umiLength = read.getUMILength();
 
-            if(umiRead.containsKey(umi)){
-                ReadFreq prev = umiRead.get(umi);
+            ReadFreq prev = umiRead.get(umi);
+
+            if(prev != null){
                 prev.read = merge.merge(read, prev.read);
                 prev.freq++;
             }else{
@@ -269,6 +276,18 @@ public class DeduplicateSAM{
             System.out.println("Number of groups of reads\t" + dedupedCount);
         else
             System.out.println("Number of reads after deduplicating\t" + dedupedCount);
+    }
+
+    private static int estimatedAlignmentMapCapacity(File in){
+        long estimated = in.length() / 128L;
+
+        if(estimated < MIN_ALIGN_MAP_CAPACITY)
+            return MIN_ALIGN_MAP_CAPACITY;
+
+        if(estimated > MAX_ALIGN_MAP_CAPACITY)
+            return MAX_ALIGN_MAP_CAPACITY;
+
+        return (int)estimated;
     }
 
     // trade off speed for lower memory usage
@@ -532,7 +551,9 @@ public class DeduplicateSAM{
                 this.set = new HashSet<ReversedRead>();
             }
 
-            this.writer = new SAMFileWriterFactory().makeSAMOrBAMWriter(r.getFileHeader(), false, out);
+            SAMFileHeader header = r.getFileHeader().clone();
+            header.setSortOrder(SAMFileHeader.SortOrder.unsorted);
+            this.writer = new SAMFileWriterFactory().makeSAMOrBAMWriter(header, true, out);
             this.paired = paired;
         }
 
