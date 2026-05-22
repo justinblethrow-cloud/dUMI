@@ -305,8 +305,14 @@ public class DeduplicateSAM{
             return eligible;
 
         if(STREAMING_MODE.equals("on")){
-            if(!eligible)
-                throw new UnsupportedOperationException("Streaming mode requires coordinate-sorted, single-end, non-parallel SAM/BAM without cluster tracking");
+            if(!eligible){
+                SAMFileHeader.SortOrder sortOrder = reader.getFileHeader().getSortOrder();
+                throw new UnsupportedOperationException(
+                        "Streaming mode requires @HD SO:coordinate input, single-end reads, non-parallel execution, "
+                        + "and cluster tracking disabled; observed sortOrder=" + sortOrder
+                        + ". Sort the input BAM with samtools sort before dUMI, or run with --streaming-mode off."
+                );
+            }
 
             return true;
         }
@@ -326,6 +332,8 @@ public class DeduplicateSAM{
         int readCount = 0;
         int alignPosCount = 0;
         String currentRef = null;
+        int lastReferenceIndex = Integer.MIN_VALUE;
+        int lastAlignmentStart = Integer.MIN_VALUE;
 
         System.out.println("Using coordinate-sorted single-end streaming fast path");
 
@@ -340,6 +348,20 @@ public class DeduplicateSAM{
             }
 
             String recordRef = record.getReferenceName();
+            int referenceIndex = record.getReferenceIndex();
+            int alignmentStart = record.getAlignmentStart();
+
+            if(referenceIndex < lastReferenceIndex || (referenceIndex == lastReferenceIndex && alignmentStart < lastAlignmentStart)){
+                throw new IllegalStateException(
+                        "Streaming mode requires records to be in coordinate order, but read " + record.getReadName()
+                        + " at " + recordRef + ":" + alignmentStart
+                        + " follows referenceIndex=" + lastReferenceIndex + " start=" + lastAlignmentStart
+                        + ". Sort the input BAM with samtools sort before dUMI, or run with --streaming-mode off."
+                );
+            }
+
+            lastReferenceIndex = referenceIndex;
+            lastAlignmentStart = alignmentStart;
 
             if(currentRef == null){
                 currentRef = recordRef;
