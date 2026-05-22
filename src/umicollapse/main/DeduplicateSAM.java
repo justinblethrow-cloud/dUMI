@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.PriorityQueue;
 
 import java.util.stream.Stream;
 
@@ -32,6 +33,10 @@ import static umicollapse.util.Utils.HASH_CONST;
 public class DeduplicateSAM{
     private static final int MIN_ALIGN_MAP_CAPACITY = 1 << 16;
     private static final int MAX_ALIGN_MAP_CAPACITY = 1 << 24;
+    // Positive-strand unclipped starts can precede coordinate sort starts by soft/hard clipping.
+    // Keep a conservative window and fail if a flushed alignment key is seen again.
+    private static final int STREAMING_POSITIVE_LAG = Integer.getInteger("umicollapse.streaming.positiveLag", 10000);
+    private static final boolean STREAMING_VALIDATE_FLUSH = Boolean.parseBoolean(System.getProperty("umicollapse.streaming.validateFlush", "true"));
 
     private int avgUMICount;
     private int maxUMICount;
@@ -42,6 +47,12 @@ public class DeduplicateSAM{
         SAMRead.setDefaultUMIPattern(umiSeparator);
 
         SamReader reader = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
+
+        if(canUseStreamingSingleEnd(reader, algo, dataClass, parallel, paired, trackClusters)){
+            deduplicateAndMergeSingleEndStreaming(in, out, reader, algo, dataClass, merge, umiLengthParam, k, percentage, keepUnmapped);
+            return;
+        }
+
         Writer writer = new Writer(in, out, reader, paired);
         Map<Alignment, Map<BitSet, ReadFreq>> align = new HashMap<>(estimatedAlignmentMapCapacity(in));
 
@@ -276,6 +287,166 @@ public class DeduplicateSAM{
             System.out.println("Number of groups of reads\t" + dedupedCount);
         else
             System.out.println("Number of reads after deduplicating\t" + dedupedCount);
+    }
+
+    private boolean canUseStreamingSingleEnd(SamReader reader, Algo algo, Class<? extends Data> dataClass, boolean parallel, boolean paired, boolean trackClusters){
+        return !paired
+            && !parallel
+            && !trackClusters
+            && algo instanceof Algorithm
+            && DataStructure.class.isAssignableFrom(dataClass)
+            && reader.getFileHeader().getSortOrder() == SAMFileHeader.SortOrder.coordinate;
+    }
+
+    private void deduplicateAndMergeSingleEndStreaming(File in, File out, SamReader reader, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, boolean keepUnmapped){
+        Writer writer = new Writer(in, out, reader, false);
+        Map<Alignment, StreamingAlignReads> active = new HashMap<>(MIN_ALIGN_MAP_CAPACITY);
+        PriorityQueue<StreamingAlignReads> ready = new PriorityQueue<>((a, b) -> Integer.compare(a.flushStart, b.flushStart));
+        HashSet<Alignment> flushed = STREAMING_VALIDATE_FLUSH ? new HashSet<Alignment>(MIN_ALIGN_MAP_CAPACITY) : null;
+
+        umiLength = umiLengthParam;
+        int totalReadCount = 0;
+        int unmapped = 0;
+        int readCount = 0;
+        int alignPosCount = 0;
+        String currentRef = null;
+
+        System.out.println("Using coordinate-sorted single-end streaming fast path");
+
+        for(SAMRecord record : reader){
+            totalReadCount++;
+
+            if(record.getReadUnmappedFlag()){
+                unmapped++;
+                if(keepUnmapped)
+                    writer.write(record);
+                continue;
+            }
+
+            String recordRef = record.getReferenceName();
+
+            if(currentRef == null){
+                currentRef = recordRef;
+            }else if(!currentRef.equals(recordRef)){
+                flushAllStreamingGroups(active, ready, writer, algo, dataClass, k, percentage);
+                if(flushed != null)
+                    flushed.clear();
+                currentRef = recordRef;
+            }
+
+            flushReadyStreamingGroups(active, ready, flushed, writer, algo, dataClass, k, percentage, record.getAlignmentStart());
+
+            Alignment alignment = singleEndAlignment(record);
+
+            if(flushed != null && flushed.contains(alignment))
+                throw new IllegalStateException("Streaming positive-lag window was too small for alignment " + alignment.getRef() + ":" + alignment.coord + " strand=" + alignment.strand + "; rerun with -Dumicollapse.streaming.positiveLag=<larger value>");
+
+            StreamingAlignReads alignReads = active.get(alignment);
+
+            if(alignReads == null){
+                alignReads = new StreamingAlignReads(alignment, streamingFlushStart(alignment));
+                active.put(alignment, alignReads);
+                ready.add(alignReads);
+                alignPosCount++;
+            }
+
+            addRead(alignReads.umiRead, record, merge);
+            readCount++;
+        }
+
+        flushAllStreamingGroups(active, ready, writer, algo, dataClass, k, percentage);
+
+        try{
+            reader.close();
+        }catch(Exception e){
+            e.printStackTrace();
+        }
+
+        writer.close();
+
+        System.out.println("Number of input reads\t" + totalReadCount);
+        System.out.println("Number of removed unmapped reads\t" + unmapped);
+        System.out.println("Number of unremoved reads\t" + readCount);
+        System.out.println("Number of unique alignment positions\t" + alignPosCount);
+        System.out.println("Average number of UMIs per alignment position\t" + ((double)avgUMICount / alignPosCount));
+        System.out.println("Max number of UMIs over all alignment positions\t" + maxUMICount);
+        System.out.println("Number of reads after deduplicating\t" + dedupedCount);
+    }
+
+    private void flushReadyStreamingGroups(Map<Alignment, StreamingAlignReads> active, PriorityQueue<StreamingAlignReads> ready, HashSet<Alignment> flushed, Writer writer, Algo algo, Class<? extends Data> dataClass, int k, float percentage, int currentStart){
+        while(!ready.isEmpty() && ready.peek().flushStart < currentStart){
+            StreamingAlignReads alignReads = ready.poll();
+
+            if(active.remove(alignReads.alignment) == null)
+                continue;
+
+            flushStreamingGroup(alignReads, writer, algo, dataClass, k, percentage);
+
+            if(flushed != null)
+                flushed.add(alignReads.alignment);
+        }
+    }
+
+    private void flushAllStreamingGroups(Map<Alignment, StreamingAlignReads> active, PriorityQueue<StreamingAlignReads> ready, Writer writer, Algo algo, Class<? extends Data> dataClass, int k, float percentage){
+        while(!ready.isEmpty()){
+            StreamingAlignReads alignReads = ready.poll();
+
+            if(active.remove(alignReads.alignment) != null)
+                flushStreamingGroup(alignReads, writer, algo, dataClass, k, percentage);
+        }
+    }
+
+    private void flushStreamingGroup(StreamingAlignReads alignReads, Writer writer, Algo algo, Class<? extends Data> dataClass, int k, float percentage){
+        List<Read> deduped;
+        Data data = null;
+
+        try{
+            data = dataClass.getDeclaredConstructor().newInstance();
+        }catch(Exception ex){
+            ex.printStackTrace();
+        }
+
+        deduped = ((Algorithm)algo).apply(alignReads.umiRead, (DataStructure)data, new ClusterTracker(false), umiLength, k, percentage);
+
+        avgUMICount += alignReads.umiRead.size();
+        maxUMICount = Math.max(maxUMICount, alignReads.umiRead.size());
+        dedupedCount += deduped.size();
+
+        for(Read read : deduped)
+            writer.write(((SAMRead)read).toSAMRecord());
+    }
+
+    private void addRead(Map<BitSet, ReadFreq> umiRead, SAMRecord record, Merge merge){
+        Read read = new SAMRead(record);
+        BitSet umi = read.getUMI(umiLength);
+
+        if(umiLength == -1)
+            umiLength = read.getUMILength();
+
+        ReadFreq prev = umiRead.get(umi);
+
+        if(prev != null){
+            prev.read = merge.merge(read, prev.read);
+            prev.freq++;
+        }else{
+            umiRead.put(umi, new ReadFreq(read, 1));
+        }
+    }
+
+    private static Alignment singleEndAlignment(SAMRecord record){
+        return new Alignment(
+                record.getReadNegativeStrandFlag(),
+                record.getReadNegativeStrandFlag() ? record.getUnclippedEnd() : record.getUnclippedStart(),
+                record.getReferenceName()
+        );
+    }
+
+    private static int streamingFlushStart(Alignment alignment){
+        if(alignment.strand)
+            return alignment.coord;
+
+        long flushStart = (long)alignment.coord + STREAMING_POSITIVE_LAG;
+        return flushStart > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int)flushStart;
     }
 
     private static int estimatedAlignmentMapCapacity(File in){
@@ -637,6 +808,18 @@ public class DeduplicateSAM{
         public AlignReads(){
             this.latest = 0;
             this.umiRead = null;
+        }
+    }
+
+    private static class StreamingAlignReads{
+        public Alignment alignment;
+        public int flushStart;
+        public Map<BitSet, ReadFreq> umiRead;
+
+        public StreamingAlignReads(Alignment alignment, int flushStart){
+            this.alignment = alignment;
+            this.flushStart = flushStart;
+            this.umiRead = new HashMap<BitSet, ReadFreq>(4);
         }
     }
 
