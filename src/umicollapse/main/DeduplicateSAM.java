@@ -37,6 +37,7 @@ public class DeduplicateSAM{
     // Keep a conservative window and fail if a flushed alignment key is seen again.
     private static final int STREAMING_POSITIVE_LAG = Integer.getInteger("umicollapse.streaming.positiveLag", 10000);
     private static final boolean STREAMING_VALIDATE_FLUSH = Boolean.parseBoolean(System.getProperty("umicollapse.streaming.validateFlush", "true"));
+    private static final String STREAMING_MODE = System.getProperty("umicollapse.streaming.mode", "auto").toLowerCase();
 
     private int avgUMICount;
     private int maxUMICount;
@@ -290,12 +291,27 @@ public class DeduplicateSAM{
     }
 
     private boolean canUseStreamingSingleEnd(SamReader reader, Algo algo, Class<? extends Data> dataClass, boolean parallel, boolean paired, boolean trackClusters){
-        return !paired
+        boolean eligible = !paired
             && !parallel
             && !trackClusters
             && algo instanceof Algorithm
             && DataStructure.class.isAssignableFrom(dataClass)
             && reader.getFileHeader().getSortOrder() == SAMFileHeader.SortOrder.coordinate;
+
+        if(STREAMING_MODE.equals("off"))
+            return false;
+
+        if(STREAMING_MODE.equals("auto"))
+            return eligible;
+
+        if(STREAMING_MODE.equals("on")){
+            if(!eligible)
+                throw new UnsupportedOperationException("Streaming mode requires coordinate-sorted, single-end, non-parallel SAM/BAM without cluster tracking");
+
+            return true;
+        }
+
+        throw new IllegalArgumentException("Invalid streaming mode '" + STREAMING_MODE + "'; expected auto, on, or off");
     }
 
     private void deduplicateAndMergeSingleEndStreaming(File in, File out, SamReader reader, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, boolean keepUnmapped){
