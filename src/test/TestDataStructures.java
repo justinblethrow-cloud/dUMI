@@ -52,16 +52,13 @@ public class TestDataStructures{
                 if(TestUtils.setMatches(set, baselineSet)){
                     System.out.println("Passed: data structure\t" + d.getClass().getName());
                 }else{
-                    System.out.println("\nError");
-
-                    for(String s : umiList)
-                        System.out.println(s);
-
-                    System.out.println("Data structure\t" + d.getClass().getName());
-                    System.out.println("Max number of edits\t" + k);
-                    System.out.println("Query\t" + Utils.toString(umi, umiLength));
-                    System.out.println("Baseline result\t" + baselineSet);
-                    System.out.println("This result\t" + set);
+                    throw new AssertionError(
+                            "Data structure " + d.getClass().getName()
+                            + " disagreed with baseline for k=" + k
+                            + ", query=" + Utils.toString(umi, umiLength)
+                            + ", expected=" + baselineSet
+                            + ", actual=" + set
+                    );
                 }
             }
         }

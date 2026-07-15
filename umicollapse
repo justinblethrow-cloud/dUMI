@@ -1,1 +1,21 @@
-java -server -Xms12G -Xmx15G -Xss20M -jar umicollapse.jar $@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
+if [[ -n ${JAVA:-} ]]; then
+    JAVA_BIN=$JAVA
+elif [[ -n ${JAVA_HOME:-} && -x $JAVA_HOME/bin/java ]]; then
+    JAVA_BIN="$JAVA_HOME/bin/java"
+elif [[ -x $ROOT_DIR/.tools/jdk/bin/java ]]; then
+    JAVA_BIN="$ROOT_DIR/.tools/jdk/bin/java"
+else
+    JAVA_BIN=java
+fi
+
+java_opts=()
+if [[ -n ${UMICOLLAPSE_JAVA_OPTS:-} ]]; then
+    read -r -a java_opts <<< "$UMICOLLAPSE_JAVA_OPTS"
+fi
+
+exec "$JAVA_BIN" -server "${java_opts[@]}" -jar "$ROOT_DIR/umicollapse.jar" "$@"

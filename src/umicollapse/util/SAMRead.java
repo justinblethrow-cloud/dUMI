@@ -30,9 +30,7 @@ public class SAMRead extends Read{
         if(fastUnderscoreUMI){
             String readName = record.getReadName();
             int start = findFastUMIStart(readName);
-            int end = maxLength >= 0 && start + maxLength <= readName.length()
-                    ? start + maxLength
-                    : findFastUMIEnd(readName, start, maxLength);
+            int end = findFastUMIEnd(readName, start, maxLength);
 
             return Utils.toBitSet(readName, start, end);
         }

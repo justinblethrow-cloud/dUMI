@@ -1,5 +1,16 @@
-# UMICollapse
-Accelerating the deduplication and collapsing process for reads with Unique Molecular Identifiers (UMI).
+# dUMI
+
+dUMI is the Plasmidsaurus DGE performance fork of UMICollapse. It retains the
+UMICollapse command-line interface while adding optimized UMI data structures
+and a guarded, bounded-memory fast path for coordinate-sorted single-end
+SAM/BAM input. The fork is based on upstream UMICollapse v1.1.0 (`aeacd82`).
+
+See [MIGRATION.md](MIGRATION.md) for repository provenance and
+[VALIDATION.md](VALIDATION.md) for the current acceptance record.
+
+## About UMICollapse
+
+UMICollapse accelerates the deduplication and collapsing process for reads with Unique Molecular Identifiers (UMI).
 
 UMIs are a popular way to identify duplicate DNA/RNA reads caused by PCR amplification. This requires software for collapsing duplicate reads with the same UMI, while accounting for sequencing/PCR errors. This tool implements many efficient algorithms for orders-of-magnitude faster UMI deduplication than previous tools (UMI-tools, etc.), while maintaining similar functionality. This is achieved by using faster data structures with n-grams and BK-trees, along other techniques that are carefully implemented to scale well to larger datasets and longer UMIs. Users of UMICollapse have reported speedups from taking *hours or days* to run with a previous tool to taking only a few *minutes* with this tool with real datasets!
 
@@ -23,35 +34,36 @@ conda install -c bioconda umicollapse
 It is also available as a `nf-core` [module](https://nf-co.re/modules/umicollapse).
 (Thanks to [@CharlotteAnne](https://github.com/CharlotteAnne)!)
 
-Alternatively, you can clone this repository:
+Alternatively, clone this fork:
 ```
-git clone https://github.com/Daniel-Liu-c0deb0t/UMICollapse.git
-cd UMICollapse
+git clone https://github.com/justinblethrow-cloud/dUMI.git
+cd dUMI
 ```
-Then, install the dependencies, which are used for FASTQ/SAM/BAM input/output operations. Make sure you have Java 11.
+
+Install a JDK 11 or newer, plus `curl`, `sha256sum`, and `unzip`. The build
+fetches the two runtime dependencies at their checksum-locked versions. To
+fetch or verify them independently, run:
+
 ```
-mkdir lib
-cd lib
-curl -O -L https://repo1.maven.org/maven2/com/github/samtools/htsjdk/2.19.0/htsjdk-2.19.0.jar
-curl -O -L https://repo1.maven.org/maven2/org/xerial/snappy/snappy-java/1.1.7.3/snappy-java-1.1.7.3.jar
-cd ..
+./scripts/bootstrap-dependencies.sh
 ```
-Now you have UMICollapse installed!
+
+Dependency URLs and SHA-256 digests are recorded in `dependencies.lock`.
 
 ## Example Run
 First, get some sample data from the UMI-tools repository. These aligned reads have their UMIs extracted and concatenated to the end of their read headers (you can do this with the `extract` tool in UMI-tools, using "`_`" as the UMI separator). Make sure you have `samtools` installed to index the BAM file.
 ```
-mkdir test
-cd test
+mkdir -p test/example
+cd test/example
 curl -O -L https://github.com/CGATOxford/UMI-tools/releases/download/1.0.0/example.bam
 samtools index example.bam
-cd ..
+cd ../..
 ```
-Finally, `test/example.bam` can be deduplicated.
+Finally, `test/example/example.bam` can be deduplicated.
 ```
-./umicollapse bam -i test/example.bam -o test/dedup_example.bam
+./umicollapse bam -i test/example/example.bam -o test/example/dedup_example.bam
 ```
-The UMI length will be autodetected, and the output `test/dedup_example.bam` should only contain reads that have a unique UMI. Unmapped reads are removed. One goal of UMICollapse is to offer similar deduplication results as UMI-tools, so it can be easily integrated into existing workflows.
+The UMI length will be autodetected, and the output `test/example/dedup_example.bam` should only contain reads that have a unique UMI. Unmapped reads are removed. One goal of UMICollapse is to offer similar deduplication results as UMI-tools, so it can be easily integrated into existing workflows.
 
 Here is a hypothetical example with paired-end reads:
 ```
@@ -76,18 +88,31 @@ The examples above are based on the workflow where reads are aligned to produce 
 It is important to note that UMIs are first collapsed by identity (exact same UMIs), and then grouped/clustered using the directional/adjacency/connected components algorithms that allow for some errors/mismatches.
 
 ## Building
-Run
+
+Build Java 11-compatible bytecode and the production JAR with:
+
 ```
 ./build.sh
 ```
-to build the executable `.jar` file.
+
+The build starts from a clean `build/` directory, compiles test classes
+separately, packages production classes only, and embeds a source-tree hash in
+`umicollapse.jar`.
 
 ## Testing
-Running basic tests after the `.jar` file is built:
+
+Run the full local verification gate with:
+
 ```
-./test.sh
+./scripts/check.sh
 ```
-There are also some small scripts for testing and debugging. For example, comparing two files to check if the UMIs are the same can be done with:
+
+This rebuilds the JAR, verifies its embedded source hash and Java 11 bytecode
+target, runs assertion-based unit and randomized data-structure tests, and runs
+the SAM/BAM streaming equivalence and failure-safety matrix. `./test.sh` runs
+the tests without rebuilding. CI runs the same gate on Java 11 and Java 21.
+
+There are also small scripts for testing and debugging. For example, comparing two files to check if the UMIs are the same can be done with:
 ```
 ./run.sh test.CompareDedupUMI test/dedup_example_1.bam test/dedup_example_2.bam
 ```
@@ -119,9 +144,20 @@ or running benchmarks:
 * `--remove-chimeric`: remove chimeric reads (pairs map to different references) during paired-end mode. Default: false.
 * `--keep-unmapped`: keep unmapped reads (no paired-end mode). Default: false.
 * `--tag`: tag reads that belong to the same group without removing them. In `fastq` mode, this will append `cluster_id=[unique ID for all reads of the same cluster]` to the header of every read. `cluster_size=[number of reads in the cluster]` will only be appended to the header of a consensus read for an entire group/cluster. `same_umi=[number of reads with the same UMI]` will be appended to the header of the "best" read of a group of reads with the exact same UMI (not allowing mismatches). In `sam`/`bam` mode, then all reads but the consensus reads will be marked with the duplicate flag. The `MI` attribute will be set with the `cluster_id` and the `RX` attribute will be set with the UMI of the consensus read. If applicable, the `cs` attribute is set with the `cluster_size`, and the `su` attribute is set with the `same_umi` count. For paired-end reads, only the forwards reads are tagged. This does not work with the `--two-pass` feature.
+* `--streaming-mode`: coordinate-sorted single-end SAM/BAM fast path. `auto` (default) uses streaming when compatible and safely retries the legacy path if coordinate order or the configured clipping window makes streaming unsafe. `on` requires streaming and fails without replacing the requested output when its contract is violated. `off` always uses the legacy path. Streaming is incompatible with paired, parallel, tagging, two-pass, and FASTQ modes. Streaming output is declared `SO:unsorted` because groups can be emitted outside coordinate order.
 
 ## Java Virtual Machine Memory
-If you need more memory to process larger datasets, then modify the `umicollapse` file. `-Xms` represents the initial heap size, `-Xmx` represents the max heap size, and `-Xss` represents the stack size. If you do not know how much memory is needed, it may be a good idea to set a small initial heap size, and a very large max heap size, so the heap can grow when necessary. If memory usage is still is an issue, use the `--two-pass` option to save memory when the reads are approximately sorted (this is not a strict requirement, its just that when reads with the same alignment coordinate are close together in the file, they do not have to be kept in memory for very long).
+
+The launcher now uses JVM defaults instead of reserving 12 GB at startup. Set
+`UMICOLLAPSE_JAVA_OPTS` when a workload needs explicit tuning, for example:
+
+```
+UMICOLLAPSE_JAVA_OPTS='-Xms12G -Xmx15G -Xss20M' ./umicollapse bam ...
+```
+
+For compatible coordinate-sorted single-end inputs, the default streaming fast
+path bounds retained alignment groups to a coordinate window. Use `--two-pass`
+or tune the heap for incompatible workloads.
 
 ## Issues
 Please open an issue if you have any questions/bugs/suggestions!

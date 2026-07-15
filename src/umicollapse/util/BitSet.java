@@ -52,10 +52,17 @@ public class BitSet implements Comparable{
         int bitIdx = idx * Read.ENCODING_LENGTH;
 
         for(int i = 0; i < Read.ENCODING_LENGTH; i++){
-            if((value & (1 << i)) != 0){
-                int j = bitIdx + i;
-                bits[j / CHUNK_SIZE] |= 1L << (j % CHUNK_SIZE);
-            }
+            int j = bitIdx + i;
+            int chunk = j / CHUNK_SIZE;
+            long mask = 1L << (j % CHUNK_SIZE);
+
+            if((value & (1 << i)) != 0)
+                bits[chunk] |= mask;
+            else
+                bits[chunk] &= ~mask;
+
+            if(nBits != null)
+                nBits[chunk] &= ~mask;
         }
 
         if(value == Read.UNDETERMINED){

@@ -18,6 +18,10 @@ import java.util.PriorityQueue;
 import java.util.stream.Stream;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 
 import umicollapse.util.BitSet;
 import umicollapse.data.*;
@@ -34,10 +38,8 @@ public class DeduplicateSAM{
     private static final int MIN_ALIGN_MAP_CAPACITY = 1 << 16;
     private static final int MAX_ALIGN_MAP_CAPACITY = 1 << 24;
     // Positive-strand unclipped starts can precede coordinate sort starts by soft/hard clipping.
-    // Keep a conservative window and fail if a flushed alignment key is seen again.
+    // Keep a conservative window and reject any record whose leading clipping exceeds it.
     private static final int STREAMING_POSITIVE_LAG = Integer.getInteger("umicollapse.streaming.positiveLag", 10000);
-    private static final boolean STREAMING_VALIDATE_FLUSH = Boolean.parseBoolean(System.getProperty("umicollapse.streaming.validateFlush", "true"));
-    private static final String STREAMING_MODE = System.getProperty("umicollapse.streaming.mode", "auto").toLowerCase();
 
     private int avgUMICount;
     private int maxUMICount;
@@ -45,16 +47,34 @@ public class DeduplicateSAM{
     private int umiLength;
 
     public void deduplicateAndMerge(File in, File out, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, boolean parallel, String umiSeparator, boolean paired, boolean removeUnpaired, boolean removeChimeric, boolean keepUnmapped, boolean trackClusters){
+        deduplicateAndMerge(
+                in, out, algo, dataClass, merge, umiLengthParam, k, percentage,
+                parallel, umiSeparator, paired, removeUnpaired, removeChimeric,
+                keepUnmapped, trackClusters,
+                System.getProperty("umicollapse.streaming.mode", "auto")
+        );
+    }
+
+    public void deduplicateAndMerge(File in, File out, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, boolean parallel, String umiSeparator, boolean paired, boolean removeUnpaired, boolean removeChimeric, boolean keepUnmapped, boolean trackClusters, String streamingMode){
         SAMRead.setDefaultUMIPattern(umiSeparator);
+        streamingMode = streamingMode.toLowerCase();
 
         SamReader reader = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
 
-        if(canUseStreamingSingleEnd(reader, algo, dataClass, parallel, paired, trackClusters)){
-            deduplicateAndMergeSingleEndStreaming(in, out, reader, algo, dataClass, merge, umiLengthParam, k, percentage, keepUnmapped);
-            return;
+        if(canUseStreamingSingleEnd(reader, algo, dataClass, parallel, paired, trackClusters, streamingMode)){
+            try{
+                deduplicateAndMergeSingleEndStreaming(in, out, reader, algo, dataClass, merge, umiLengthParam, k, percentage, keepUnmapped);
+                return;
+            }catch(StreamingFallbackException ex){
+                if(!streamingMode.equals("auto"))
+                    throw ex;
+
+                System.err.println("Streaming fast path was not safe for this input; retrying with --streaming-mode off: " + ex.getMessage());
+                reader = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
+            }
         }
 
-        Writer writer = new Writer(in, out, reader, paired);
+        Writer writer = new Writer(in, out, reader, paired, false);
         Map<Alignment, Map<BitSet, ReadFreq>> align = new HashMap<>(estimatedAlignmentMapCapacity(in));
 
         umiLength = umiLengthParam;
@@ -290,7 +310,7 @@ public class DeduplicateSAM{
             System.out.println("Number of reads after deduplicating\t" + dedupedCount);
     }
 
-    private boolean canUseStreamingSingleEnd(SamReader reader, Algo algo, Class<? extends Data> dataClass, boolean parallel, boolean paired, boolean trackClusters){
+    private boolean canUseStreamingSingleEnd(SamReader reader, Algo algo, Class<? extends Data> dataClass, boolean parallel, boolean paired, boolean trackClusters, String streamingMode){
         boolean eligible = !paired
             && !parallel
             && !trackClusters
@@ -298,13 +318,13 @@ public class DeduplicateSAM{
             && DataStructure.class.isAssignableFrom(dataClass)
             && reader.getFileHeader().getSortOrder() == SAMFileHeader.SortOrder.coordinate;
 
-        if(STREAMING_MODE.equals("off"))
+        if(streamingMode.equals("off"))
             return false;
 
-        if(STREAMING_MODE.equals("auto"))
+        if(streamingMode.equals("auto"))
             return eligible;
 
-        if(STREAMING_MODE.equals("on")){
+        if(streamingMode.equals("on")){
             if(!eligible){
                 SAMFileHeader.SortOrder sortOrder = reader.getFileHeader().getSortOrder();
                 throw new UnsupportedOperationException(
@@ -317,16 +337,20 @@ public class DeduplicateSAM{
             return true;
         }
 
-        throw new IllegalArgumentException("Invalid streaming mode '" + STREAMING_MODE + "'; expected auto, on, or off");
+        throw new IllegalArgumentException("Invalid streaming mode '" + streamingMode + "'; expected auto, on, or off");
     }
 
     private void deduplicateAndMergeSingleEndStreaming(File in, File out, SamReader reader, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, boolean keepUnmapped){
-        Writer writer = new Writer(in, out, reader, false);
+        File temporaryOut = createStreamingTemporaryFile(out);
+        Writer writer = new Writer(in, temporaryOut, reader, false, true);
+        boolean writerClosed = false;
         Map<Alignment, StreamingAlignReads> active = new HashMap<>(MIN_ALIGN_MAP_CAPACITY);
         PriorityQueue<StreamingAlignReads> ready = new PriorityQueue<>((a, b) -> Integer.compare(a.flushStart, b.flushStart));
-        HashSet<Alignment> flushed = STREAMING_VALIDATE_FLUSH ? new HashSet<Alignment>(MIN_ALIGN_MAP_CAPACITY) : null;
 
         umiLength = umiLengthParam;
+        avgUMICount = 0;
+        maxUMICount = 0;
+        dedupedCount = 0;
         int totalReadCount = 0;
         int unmapped = 0;
         int readCount = 0;
@@ -337,70 +361,85 @@ public class DeduplicateSAM{
 
         System.out.println("Using coordinate-sorted single-end streaming fast path");
 
-        for(SAMRecord record : reader){
-            totalReadCount++;
-
-            if(record.getReadUnmappedFlag()){
-                unmapped++;
-                if(keepUnmapped)
-                    writer.write(record);
-                continue;
-            }
-
-            String recordRef = record.getReferenceName();
-            int referenceIndex = record.getReferenceIndex();
-            int alignmentStart = record.getAlignmentStart();
-
-            if(referenceIndex < lastReferenceIndex || (referenceIndex == lastReferenceIndex && alignmentStart < lastAlignmentStart)){
-                throw new IllegalStateException(
-                        "Streaming mode requires records to be in coordinate order, but read " + record.getReadName()
-                        + " at " + recordRef + ":" + alignmentStart
-                        + " follows referenceIndex=" + lastReferenceIndex + " start=" + lastAlignmentStart
-                        + ". Sort the input BAM with samtools sort before dUMI, or run with --streaming-mode off."
-                );
-            }
-
-            lastReferenceIndex = referenceIndex;
-            lastAlignmentStart = alignmentStart;
-
-            if(currentRef == null){
-                currentRef = recordRef;
-            }else if(!currentRef.equals(recordRef)){
-                flushAllStreamingGroups(active, ready, writer, algo, dataClass, k, percentage);
-                if(flushed != null)
-                    flushed.clear();
-                currentRef = recordRef;
-            }
-
-            flushReadyStreamingGroups(active, ready, flushed, writer, algo, dataClass, k, percentage, record.getAlignmentStart());
-
-            Alignment alignment = singleEndAlignment(record);
-
-            if(flushed != null && flushed.contains(alignment))
-                throw new IllegalStateException("Streaming positive-lag window was too small for alignment " + alignment.getRef() + ":" + alignment.coord + " strand=" + alignment.strand + "; rerun with -Dumicollapse.streaming.positiveLag=<larger value>");
-
-            StreamingAlignReads alignReads = active.get(alignment);
-
-            if(alignReads == null){
-                alignReads = new StreamingAlignReads(alignment, streamingFlushStart(alignment));
-                active.put(alignment, alignReads);
-                ready.add(alignReads);
-                alignPosCount++;
-            }
-
-            addRead(alignReads.umiRead, record, merge);
-            readCount++;
-        }
-
-        flushAllStreamingGroups(active, ready, writer, algo, dataClass, k, percentage);
-
         try{
-            reader.close();
-        }catch(Exception e){
-            e.printStackTrace();
-        }
+            for(SAMRecord record : reader){
+                totalReadCount++;
 
-        writer.close();
+                if(record.getReadUnmappedFlag()){
+                    unmapped++;
+                    if(keepUnmapped)
+                        writer.write(record);
+                    continue;
+                }
+
+                String recordRef = record.getReferenceName();
+                int referenceIndex = record.getReferenceIndex();
+                int alignmentStart = record.getAlignmentStart();
+
+                if(referenceIndex < lastReferenceIndex || (referenceIndex == lastReferenceIndex && alignmentStart < lastAlignmentStart)){
+                    throw new StreamingFallbackException(
+                            "Streaming mode requires records to be in coordinate order, but read " + record.getReadName()
+                            + " at " + recordRef + ":" + alignmentStart
+                            + " follows referenceIndex=" + lastReferenceIndex + " start=" + lastAlignmentStart
+                            + ". Sort the input BAM with samtools sort before dUMI, or run with --streaming-mode off."
+                    );
+                }
+
+                lastReferenceIndex = referenceIndex;
+                lastAlignmentStart = alignmentStart;
+
+                if(currentRef == null){
+                    currentRef = recordRef;
+                }else if(!currentRef.equals(recordRef)){
+                    flushAllStreamingGroups(active, ready, writer, algo, dataClass, k, percentage);
+                    currentRef = recordRef;
+                }
+
+                Alignment alignment = singleEndAlignment(record);
+                validateStreamingLag(record, alignment);
+                flushReadyStreamingGroups(active, ready, writer, algo, dataClass, k, percentage, alignmentStart);
+
+                StreamingAlignReads alignReads = active.get(alignment);
+
+                if(alignReads == null){
+                    alignReads = new StreamingAlignReads(alignment, streamingFlushStart(alignment));
+                    active.put(alignment, alignReads);
+                    ready.add(alignReads);
+                    alignPosCount++;
+                }
+
+                addRead(alignReads.umiRead, record, merge);
+                readCount++;
+            }
+
+            flushAllStreamingGroups(active, ready, writer, algo, dataClass, k, percentage);
+
+            writer.close();
+            writerClosed = true;
+            promoteStreamingOutput(temporaryOut, out);
+        }catch(RuntimeException | Error ex){
+            if(!writerClosed){
+                try{
+                    writer.close();
+                }catch(RuntimeException closeEx){
+                    ex.addSuppressed(closeEx);
+                }
+            }
+
+            try{
+                Files.deleteIfExists(temporaryOut.toPath());
+            }catch(IOException deleteEx){
+                ex.addSuppressed(deleteEx);
+            }
+
+            throw ex;
+        }finally{
+            try{
+                reader.close();
+            }catch(Exception e){
+                e.printStackTrace();
+            }
+        }
 
         System.out.println("Number of input reads\t" + totalReadCount);
         System.out.println("Number of removed unmapped reads\t" + unmapped);
@@ -411,7 +450,7 @@ public class DeduplicateSAM{
         System.out.println("Number of reads after deduplicating\t" + dedupedCount);
     }
 
-    private void flushReadyStreamingGroups(Map<Alignment, StreamingAlignReads> active, PriorityQueue<StreamingAlignReads> ready, HashSet<Alignment> flushed, Writer writer, Algo algo, Class<? extends Data> dataClass, int k, float percentage, int currentStart){
+    private void flushReadyStreamingGroups(Map<Alignment, StreamingAlignReads> active, PriorityQueue<StreamingAlignReads> ready, Writer writer, Algo algo, Class<? extends Data> dataClass, int k, float percentage, int currentStart){
         while(!ready.isEmpty() && ready.peek().flushStart < currentStart){
             StreamingAlignReads alignReads = ready.poll();
 
@@ -419,9 +458,6 @@ public class DeduplicateSAM{
                 continue;
 
             flushStreamingGroup(alignReads, writer, algo, dataClass, k, percentage);
-
-            if(flushed != null)
-                flushed.add(alignReads.alignment);
         }
     }
 
@@ -479,12 +515,53 @@ public class DeduplicateSAM{
         );
     }
 
+    private static void validateStreamingLag(SAMRecord record, Alignment alignment){
+        if(alignment.strand)
+            return;
+
+        long leadingClip = (long)record.getAlignmentStart() - alignment.coord;
+
+        if(leadingClip > STREAMING_POSITIVE_LAG){
+            throw new StreamingFallbackException(
+                    "Streaming positive-lag window is too small for read " + record.getReadName()
+                    + " with " + leadingClip + " leading clipped bases; rerun with "
+                    + "-Dumicollapse.streaming.positiveLag=<at-least-" + leadingClip + ">"
+                    + " or use --streaming-mode off."
+            );
+        }
+    }
+
     private static int streamingFlushStart(Alignment alignment){
         if(alignment.strand)
             return alignment.coord;
 
         long flushStart = (long)alignment.coord + STREAMING_POSITIVE_LAG;
         return flushStart > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int)flushStart;
+    }
+
+    private static File createStreamingTemporaryFile(File out){
+        File absoluteOut = out.getAbsoluteFile();
+        File parent = absoluteOut.getParentFile();
+        String name = absoluteOut.getName().toLowerCase();
+        String suffix = name.endsWith(".bam") ? ".bam" : ".sam";
+
+        try{
+            return File.createTempFile(".dumi-stream-", suffix, parent);
+        }catch(IOException ex){
+            throw new IllegalStateException("Could not create a temporary streaming output next to " + out, ex);
+        }
+    }
+
+    private static void promoteStreamingOutput(File temporaryOut, File out){
+        try{
+            try{
+                Files.move(temporaryOut.toPath(), out.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            }catch(AtomicMoveNotSupportedException ex){
+                Files.move(temporaryOut.toPath(), out.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+        }catch(IOException ex){
+            throw new IllegalStateException("Could not move completed streaming output to " + out, ex);
+        }
     }
 
     private static int estimatedAlignmentMapCapacity(File in){
@@ -503,7 +580,7 @@ public class DeduplicateSAM{
     // input should be sorted based on alignment for best results
     public void deduplicateAndMergeTwoPass(File in, File out, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, String umiSeparator, boolean paired, boolean removeUnpaired, boolean removeChimeric, boolean keepUnmapped, boolean trackClusters){
         SamReader firstPass = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
-        Writer writer = new Writer(in, out, firstPass, paired);
+        Writer writer = new Writer(in, out, firstPass, paired, false);
         Map<Alignment, AlignReads> align = new HashMap<>(1 << 16);
         int totalReadCount = 0;
         int unmapped = 0;
@@ -754,15 +831,20 @@ public class DeduplicateSAM{
         private String ref = null;
         private HashSet<ReversedRead> set;
 
-        public Writer(File in, File out, SamReader r, boolean paired){
+        public Writer(File in, File out, SamReader r, boolean paired, boolean streaming){
             if(paired){
                 this.reader = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
                 this.set = new HashSet<ReversedRead>();
             }
 
-            SAMFileHeader header = r.getFileHeader().clone();
-            header.setSortOrder(SAMFileHeader.SortOrder.unsorted);
-            this.writer = new SAMFileWriterFactory().makeSAMOrBAMWriter(header, true, out);
+            if(streaming){
+                SAMFileHeader header = r.getFileHeader().clone();
+                header.setSortOrder(SAMFileHeader.SortOrder.unsorted);
+                this.writer = new SAMFileWriterFactory().makeSAMOrBAMWriter(header, true, out);
+            }else{
+                this.writer = new SAMFileWriterFactory().makeSAMOrBAMWriter(r.getFileHeader(), false, out);
+            }
+
             this.paired = paired;
         }
 
@@ -858,6 +940,12 @@ public class DeduplicateSAM{
             this.alignment = alignment;
             this.flushStart = flushStart;
             this.umiRead = new HashMap<BitSet, ReadFreq>(4);
+        }
+    }
+
+    private static class StreamingFallbackException extends IllegalStateException{
+        public StreamingFallbackException(String message){
+            super(message);
         }
     }
 

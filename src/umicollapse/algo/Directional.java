@@ -20,6 +20,10 @@ public class Directional implements Algorithm{
     public List<Read> apply(Map<BitSet, ReadFreq> reads, DataStructure data, ClusterTracker tracker, int umiLength, int k, float percentage){
         if(reads.size() == 1){
             Map.Entry<BitSet, ReadFreq> only = reads.entrySet().iterator().next();
+            Map<BitSet, Integer> frequencies = new HashMap<>(2);
+            frequencies.put(only.getKey(), only.getValue().freq);
+            data.init(frequencies, umiLength, k);
+            data.removeNear(only.getKey(), k, Integer.MAX_VALUE);
 
             if(tracker.shouldTrack()){
                 tracker.addAll(Collections.singleton(only.getKey()), reads);
