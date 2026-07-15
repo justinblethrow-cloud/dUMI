@@ -1,1 +1,4 @@
-java --release 11 -cp umicollapse.jar $@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec java -cp umicollapse.jar "$@"
