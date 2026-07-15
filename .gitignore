@@ -1,3 +1,5 @@
-test/
-lib/
-bin/
+/bin/
+/build/
+/lib/
+/test-output/
+/test/example/

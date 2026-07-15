@@ -47,6 +47,35 @@ public class BitSet implements Comparable{
         nBits[i] = bit ? (nBits[i] | (1L << j)) : (nBits[i] & ~(1L << j));
     }
 
+    public void setEncodedBase(int idx, int value){
+        recalcHash = true;
+        int bitIdx = idx * Read.ENCODING_LENGTH;
+
+        for(int i = 0; i < Read.ENCODING_LENGTH; i++){
+            int j = bitIdx + i;
+            int chunk = j / CHUNK_SIZE;
+            long mask = 1L << (j % CHUNK_SIZE);
+
+            if((value & (1 << i)) != 0)
+                bits[chunk] |= mask;
+            else
+                bits[chunk] &= ~mask;
+
+            if(nBits != null)
+                nBits[chunk] &= ~mask;
+        }
+
+        if(value == Read.UNDETERMINED){
+            if(nBits == null)
+                nBits = new long[bits.length];
+
+            for(int i = 0; i < Read.ENCODING_LENGTH; i++){
+                int j = bitIdx + i;
+                nBits[j / CHUNK_SIZE] |= 1L << (j % CHUNK_SIZE);
+            }
+        }
+    }
+
     public int bitCountXOR(BitSet o){
         int res = 0;
 

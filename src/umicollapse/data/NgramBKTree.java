@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.HashMap;
 
 import umicollapse.util.BitSet;
+import umicollapse.util.Read;
 import static umicollapse.util.Utils.charGet;
 import static umicollapse.util.Utils.HASH_CONST;
 import static umicollapse.util.Utils.umiDist;
@@ -14,6 +15,8 @@ public class NgramBKTree implements DataStructure{
     private Map<BitSet, Integer> umiFreq;
     private int umiLength, ngramSize, maxEdits;
     private Map<Interval, Node> m;
+    private LongNodeMap longMap;
+    private boolean useLongIntervalKeys;
 
     @Override
     public void init(Map<BitSet, Integer> umiFreq, int umiLength, int maxEdits){
@@ -22,7 +25,15 @@ public class NgramBKTree implements DataStructure{
         this.maxEdits = maxEdits;
         ngramSize = umiLength / (maxEdits + 1);
 
-        m = new HashMap<Interval, Node>();
+        useLongIntervalKeys = canUseLongIntervalKeys(umiLength, ngramSize, maxEdits);
+
+        if(useLongIntervalKeys){
+            m = null;
+            longMap = new LongNodeMap(expectedNgramEntries(umiFreq.size(), maxEdits));
+        }else{
+            longMap = null;
+            m = new HashMap<Interval, Node>(expectedNgramMapCapacity(umiFreq.size(), maxEdits));
+        }
 
         for(Map.Entry<BitSet, Integer> e : umiFreq.entrySet())
             insert(e.getKey(), e.getValue());
@@ -32,15 +43,18 @@ public class NgramBKTree implements DataStructure{
     @Override
     public Set<BitSet> removeNear(BitSet umi, int k, int maxFreq){
         Set<BitSet> res = new HashSet<>();
+        boolean queryRemoved = maxFreq == Integer.MAX_VALUE || !umiFreq.containsKey(umi);
 
         for(int i = 0; i < maxEdits + 1; i++){
-            Interval in = new Interval(umi, i * ngramSize, i == maxEdits ? (umiLength - 1) : ((i + 1) * ngramSize - 1));
+            int lo = i * ngramSize;
+            int hi = i == maxEdits ? (umiLength - 1) : ((i + 1) * ngramSize - 1);
+            Node curr = useLongIntervalKeys ? longMap.get(intervalKey(umi, lo, hi)) : m.get(new Interval(umi, lo, hi));
 
-            if(m.containsKey(in)){
-                Node curr = m.get(in);
-
-                if(maxFreq != Integer.MAX_VALUE) // always remove the queried UMI
+            if(curr != null){
+                if(!queryRemoved){ // always remove the queried UMI
                     recursiveRemoveNearBKTree(umi, curr, 0, Integer.MAX_VALUE, res);
+                    queryRemoved = !umiFreq.containsKey(umi);
+                }
 
                 recursiveRemoveNearBKTree(umi, curr, k, maxFreq, res);
             }
@@ -51,15 +65,63 @@ public class NgramBKTree implements DataStructure{
 
     private void insert(BitSet umi, int freq){
         for(int i = 0; i < maxEdits + 1; i++){
-            Interval in = new Interval(umi, i * ngramSize, i == maxEdits ? (umiLength - 1) : ((i + 1) * ngramSize - 1));
+            int lo = i * ngramSize;
+            int hi = i == maxEdits ? (umiLength - 1) : ((i + 1) * ngramSize - 1);
+            Node curr;
 
-            if(m.containsKey(in)){
-                int length = umiLength - ((i == maxEdits ? (umiLength - 1) : ((i + 1) * ngramSize - 1)) - i * ngramSize + 1);
-                insertBKTree(m.get(in), umi, length, freq);
+            if(useLongIntervalKeys){
+                long key = intervalKey(umi, lo, hi);
+                curr = longMap.get(key);
+
+                if(curr != null){
+                    insertBKTree(curr, umi, umiLength - (hi - lo + 1), freq);
+                }else{
+                    longMap.put(key, new Node(umi, freq));
+                }
             }else{
-                m.put(in, new Node(umi, freq));
+                Interval in = new Interval(umi, lo, hi);
+                curr = m.get(in);
+
+                if(curr != null){
+                    insertBKTree(curr, umi, umiLength - (hi - lo + 1), freq);
+                }else{
+                    m.put(in, new Node(umi, freq));
+                }
             }
         }
+    }
+
+    private static int expectedNgramEntries(int umiCount, int maxEdits){
+        long expectedEntries = (long)umiCount * (maxEdits + 1);
+        return expectedEntries > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int)expectedEntries;
+    }
+
+    private static int expectedNgramMapCapacity(int umiCount, int maxEdits){
+        long expectedEntries = expectedNgramEntries(umiCount, maxEdits);
+        long capacity = (expectedEntries * 4) / 3 + 1;
+
+        if(capacity < 16)
+            return 16;
+
+        return capacity > (1 << 30) ? (1 << 30) : (int)capacity;
+    }
+
+    private static boolean canUseLongIntervalKeys(int umiLength, int ngramSize, int maxEdits){
+        if(umiLength > 255)
+            return false;
+
+        int lastLength = umiLength - (maxEdits * ngramSize);
+        int maxIntervalLength = Math.max(ngramSize, lastLength);
+        return maxIntervalLength <= 16;
+    }
+
+    private static long intervalKey(BitSet s, int lo, int hi){
+        long seq = 0L;
+
+        for(int i = lo; i <= hi; i++)
+            seq = (seq << Read.ENCODING_LENGTH) | charGet(s, i);
+
+        return (((long)lo & 0xffL) << 56) | (((long)hi & 0xffL) << 48) | seq;
     }
 
     private void recursiveRemoveNearBKTree(BitSet umi, Node curr, int k, int maxFreq, Set<BitSet> res){
@@ -111,9 +173,99 @@ public class NgramBKTree implements DataStructure{
     @Override
     public Map<String, Float> stats(){
         Map<String, Float> res = new HashMap<>();
-        res.put("num n-grams", (float)m.size());
+        res.put("num n-grams", (float)(useLongIntervalKeys ? longMap.size() : m.size()));
         res.put("n-grams size", (float)ngramSize);
         return res;
+    }
+
+    private static class LongNodeMap{
+        private long[] keys;
+        private Node[] values;
+        private int size, threshold, mask;
+
+        LongNodeMap(int expectedSize){
+            int capacity = 16;
+            long target = Math.max(16L, (long)expectedSize * 2L);
+
+            while(capacity < target && capacity < (1 << 30))
+                capacity <<= 1;
+
+            keys = new long[capacity];
+            values = new Node[capacity];
+            mask = capacity - 1;
+            threshold = (int)((long)capacity * 2L / 3L);
+        }
+
+        Node get(long key){
+            int idx = index(key);
+
+            while(values[idx] != null){
+                if(keys[idx] == key)
+                    return values[idx];
+
+                idx = (idx + 1) & mask;
+            }
+
+            return null;
+        }
+
+        void put(long key, Node value){
+            if(size >= threshold)
+                resize();
+
+            putNoResize(key, value);
+        }
+
+        int size(){
+            return size;
+        }
+
+        private void putNoResize(long key, Node value){
+            int idx = index(key);
+
+            while(values[idx] != null){
+                if(keys[idx] == key){
+                    values[idx] = value;
+                    return;
+                }
+
+                idx = (idx + 1) & mask;
+            }
+
+            keys[idx] = key;
+            values[idx] = value;
+            size++;
+        }
+
+        private void resize(){
+            if(keys.length >= (1 << 30))
+                throw new IllegalStateException("NgramBKTree packed-key map exceeded its maximum capacity");
+
+            long[] oldKeys = keys;
+            Node[] oldValues = values;
+            int newCapacity = keys.length << 1;
+
+            keys = new long[newCapacity];
+            values = new Node[newCapacity];
+            mask = newCapacity - 1;
+            threshold = (int)((long)newCapacity * 2L / 3L);
+            size = 0;
+
+            for(int i = 0; i < oldValues.length; i++){
+                if(oldValues[i] != null)
+                    putNoResize(oldKeys[i], oldValues[i]);
+            }
+        }
+
+        private int index(long key){
+            long h = key;
+            h ^= h >>> 33;
+            h *= 0xff51afd7ed558ccdL;
+            h ^= h >>> 33;
+            h *= 0xc4ceb9fe1a85ec53L;
+            h ^= h >>> 33;
+            return ((int)h) & mask;
+        }
     }
 
     private static class Node{

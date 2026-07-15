@@ -3,6 +3,7 @@ package umicollapse.main;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.ArrayList;
 import java.util.Arrays;
 
@@ -91,6 +92,8 @@ public class Main{
         boolean keepUnmapped = false;
 
         boolean trackClusters = false;
+        String streamingMode = System.getProperty("umicollapse.streaming.mode", "off").toLowerCase(Locale.ROOT);
+        boolean streamingModeSpecified = false;
 
         String s = "-k";
 
@@ -187,6 +190,22 @@ public class Main{
         if(m.containsKey(s))
             trackClusters = true;
 
+        s = "--streaming-mode";
+
+        if(m.containsKey(s)){
+            streamingModeSpecified = true;
+            streamingMode = m.get(s).get(0);
+
+            if(!streamingMode.equals("auto") && !streamingMode.equals("on") && !streamingMode.equals("off"))
+                throw new IllegalArgumentException("Invalid --streaming-mode '" + streamingMode + "'; expected auto, on, or off");
+        }
+
+        if(streamingModeSpecified && !mode.equals("sam") && !mode.equals("bam"))
+            throw new UnsupportedOperationException("--streaming-mode is only supported in sam or bam mode");
+
+        if("on".equals(streamingMode) && twoPass)
+            throw new UnsupportedOperationException("--streaming-mode on cannot be combined with --two-pass");
+
         if(trackClusters && twoPass)
             throw new UnsupportedOperationException("Cannot track clusters with the two pass algorithm!");
 
@@ -218,7 +237,7 @@ public class Main{
             if(twoPass){
                 dedup.deduplicateAndMergeTwoPass(in, out, a, d, mAlgo, umiLength, k, percentage, umiSeparator, paired, removeUnpaired, removeChimeric, keepUnmapped, trackClusters);
             }else{
-                dedup.deduplicateAndMerge(in, out, a, d, mAlgo, umiLength, k, percentage, parallelAlign, umiSeparator, paired, removeUnpaired, removeChimeric, keepUnmapped, trackClusters);
+                dedup.deduplicateAndMerge(in, out, a, d, mAlgo, umiLength, k, percentage, parallelAlign, umiSeparator, paired, removeUnpaired, removeChimeric, keepUnmapped, trackClusters, streamingMode);
             }
         }
 
