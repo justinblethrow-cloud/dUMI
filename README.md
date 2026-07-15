@@ -144,7 +144,7 @@ or running benchmarks:
 * `-T`: parallelize the deduplication of one single alignment position. The data structure can only be `naive`, `bktree`, and `fenwickbktree`. Using this is discouraged as it is lacking many features. Default: false.
 * `--umi-sep`: separator string between the UMI and the rest of the read header. Default: `_`.
 * `--algo`: deduplication algorithm. Either `cc` for connected components, `adj` for adjacency, or `dir` for directional. Default: `dir`.
-* `--merge`: method for identifying which UMI to keep out of every two UMIs. Either `any`, `avgqual`, or `mapqual`. Default: `mapqual` for SAM/BAM mode, `avgqual` for FASTQ mode.
+* `--merge`: method for identifying which UMI to keep out of every two UMIs. Either `any`, `avgqual`, or `mapqual`. Default: `mapqual` for SAM/BAM mode, `avgqual` for FASTQ mode. `mapqual` resolves equal mapping-quality representatives by stable record content, so coordinate-tie input order cannot change the selected read.
 * `--data`: data structure used in deduplication. Either `naive`, `combo`, `ngram`, `delete`, `trie`, `bktree`, `sortbktree`, `ngrambktree`, `sortngrambktree`, or `fenwickbktree`. Default: `ngrambktree`.
 * `--two-pass`: use a separate two-pass algorithm for SAM/BAM deduplication. This may be slightly slower, but it should use much less memory if the reads are approximately sorted by alignment coordinate. Default: false.
 * `--paired`: use paired-end mode, which deduplicates pairs of reads from a SAM/BAM file. The template length of each read pair, along with the alignment coordinate and UMI of the forwards read, are used to deduplicate read pairs. This is very memory intensive, and the input SAM/BAM files should be sorted. Default: false (single-end).

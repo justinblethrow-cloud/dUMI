@@ -44,7 +44,16 @@ public class Directional implements Algorithm{
             idx++;
         }
 
-        Arrays.sort(freq, (a, b) -> b.readFreq.freq - a.readFreq.freq);
+        Arrays.sort(freq, (a, b) -> {
+            int frequencyOrder = Integer.compare(b.readFreq.freq, a.readFreq.freq);
+
+            if(frequencyOrder != 0)
+                return frequencyOrder;
+
+            // Equal-frequency UMIs can compete for the same neighboring UMI.
+            // HashMap iteration order is not a stable scientific tie-breaker.
+            return a.umi.compareTo(b.umi);
+        });
         data.init(m, umiLength, k);
 
         for(int i = 0; i < freq.length; i++){

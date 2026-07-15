@@ -103,6 +103,17 @@ for merge in mapqual avgqual any; do
     assert_records_equal "$TMP_DIR/off-$merge.sam" "$TMP_DIR/on-$merge.sam" "streaming parity failed for merge $merge"
 done
 
+for mode in off on; do
+    "$ROOT_DIR/umicollapse" sam -i "$FIXTURES/mapqual-tie-forward.sam" \
+        -o "$TMP_DIR/mapqual-forward-$mode.sam" --streaming-mode "$mode" -u 4 -k 0 > /dev/null
+    "$ROOT_DIR/umicollapse" sam -i "$FIXTURES/mapqual-tie-reverse.sam" \
+        -o "$TMP_DIR/mapqual-reverse-$mode.sam" --streaming-mode "$mode" -u 4 -k 0 > /dev/null
+    assert_records_equal "$TMP_DIR/mapqual-forward-$mode.sam" "$TMP_DIR/mapqual-reverse-$mode.sam" \
+        "mapqual tie representative depends on coordinate-tie order in $mode mode"
+    [[ $(inspect names "$TMP_DIR/mapqual-forward-$mode.sam") == alpha_AAAA ]] \
+        || fail "mapqual tie did not select the stable lexical representative in $mode mode"
+done
+
 for data in naive combo ngram delete trie bktree sortbktree ngrambktree sortngrambktree fenwickbktree; do
     "$ROOT_DIR/umicollapse" "${common[@]}" -o "$TMP_DIR/off-$data.sam" --streaming-mode off --data "$data" > /dev/null
     "$ROOT_DIR/umicollapse" "${common[@]}" -o "$TMP_DIR/on-$data.sam" --streaming-mode on --data "$data" > /dev/null
