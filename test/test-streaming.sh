@@ -47,16 +47,21 @@ common=(sam -i "$core" --keep-unmapped -u 4 -k 1)
 "$ROOT_DIR/umicollapse" "${common[@]}" -o "$TMP_DIR/off.sam" --streaming-mode off > "$TMP_DIR/off.log"
 "$ROOT_DIR/umicollapse" "${common[@]}" -o "$TMP_DIR/on.sam" --streaming-mode on > "$TMP_DIR/on.log"
 "$ROOT_DIR/umicollapse" "${common[@]}" -o "$TMP_DIR/auto.sam" --streaming-mode auto > "$TMP_DIR/auto.log"
+"$ROOT_DIR/umicollapse" "${common[@]}" -o "$TMP_DIR/default.sam" > "$TMP_DIR/default.log"
 
 assert_records_equal "$TMP_DIR/off.sam" "$TMP_DIR/on.sam" "streaming on differs from legacy output"
 assert_records_equal "$TMP_DIR/off.sam" "$TMP_DIR/auto.sam" "streaming auto differs from legacy output"
+assert_records_equal "$TMP_DIR/auto.sam" "$TMP_DIR/default.sam" "dUMI default differs from explicit streaming auto"
 
 [[ $(inspect sort-order "$TMP_DIR/off.sam") == coordinate ]] \
     || fail "legacy path did not preserve coordinate sort order"
 [[ $(inspect sort-order "$TMP_DIR/on.sam") == unsorted ]] \
     || fail "streaming path did not declare its reordered output unsorted"
+[[ $(inspect sort-order "$TMP_DIR/default.sam") == unsorted ]] \
+    || fail "dUMI default did not retain automatic streaming"
 grep -Fq 'Using coordinate-sorted single-end streaming fast path' "$TMP_DIR/on.log"
 grep -Fq 'Using coordinate-sorted single-end streaming fast path' "$TMP_DIR/auto.log"
+grep -Fq 'Using coordinate-sorted single-end streaming fast path' "$TMP_DIR/default.log"
 if grep -Fq 'streaming fast path' "$TMP_DIR/off.log"; then
     fail "streaming marker appeared with --streaming-mode off"
 fi
@@ -104,6 +109,23 @@ done
 
 "$ROOT_DIR/umicollapse" "${common[@]}" -o "$TMP_DIR/on.bam" --streaming-mode on > /dev/null
 assert_records_equal "$TMP_DIR/off.sam" "$TMP_DIR/on.bam" "BAM streaming output differs from SAM legacy output"
+
+"$ROOT_DIR/run.sh" test.CreateIndexedBam "$core" "$TMP_DIR/core-input.bam"
+"$ROOT_DIR/umicollapse" bam -i "$TMP_DIR/core-input.bam" -o "$TMP_DIR/bam-input-on.sam" \
+    --streaming-mode on --keep-unmapped -u 4 -k 1 > /dev/null
+assert_records_equal "$TMP_DIR/off.sam" "$TMP_DIR/bam-input-on.sam" \
+    "streaming BAM input differs from SAM legacy output"
+
+"$ROOT_DIR/run.sh" test.CreateIndexedBam "$FIXTURES/paired-coordinate.sam" "$TMP_DIR/paired-input.bam"
+"$ROOT_DIR/umicollapse" bam -i "$TMP_DIR/paired-input.bam" -o "$TMP_DIR/paired-output.bam" \
+    --paired --streaming-mode off -u 4 > /dev/null
+[[ $(inspect count "$TMP_DIR/paired-output.bam") == 4 ]] \
+    || fail "paired indexed-BAM path did not retain both mates"
+inspect records "$TMP_DIR/paired-output.bam" > "$TMP_DIR/paired.records"
+grep -Fq $'pair1_AAAA\t147\tchr1\t150' "$TMP_DIR/paired.records" \
+    || fail "paired cross-reference flush did not recover the first mate"
+grep -Fq $'pair2_CCCC\t147\tchr2\t150' "$TMP_DIR/paired.records" \
+    || fail "paired final pass did not recover the last mate"
 
 "$ROOT_DIR/umicollapse" sam -i "$FIXTURES/declared-unsorted.sam" -o "$TMP_DIR/unsorted-auto.sam" --streaming-mode auto > "$TMP_DIR/unsorted-auto.log"
 if grep -Fq 'streaming fast path' "$TMP_DIR/unsorted-auto.log"; then

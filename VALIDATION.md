@@ -1,5 +1,54 @@
 # dUMI validation record
 
+## 2026-07-15 default-branch hardening acceptance
+
+This acceptance covers the maintained `optimization/streaming-fastpath` tree
+prepared as the public default branch. dUMI branding, the project-local JDK
+fallback, and guarded `auto` streaming remain intentional fork behavior.
+
+Local environment and artifact receipts:
+
+- Full gate passed under OpenJDK `11.0.31` and OpenJDK `21.0.11`; compilation
+  targets Java 11 class version 55.
+- Production source receipt:
+  `07fa663989b7072b3fca25246cb45830e9aa045231250940f77aa5495a881392`
+- Java 11-built `umicollapse.jar` SHA-256:
+  `1c33941e652f9eaa08479ccce321b70b36dbcf2101e43c104f322527f856f7de`
+- Manifest identity: `Implementation-Title: dUMI`,
+  `Implementation-Version: streaming-fastpath`.
+
+The expanded gate adds:
+
+- two explicit packed-key boundary scenarios at UMI lengths 255 and 256, for
+  86 deterministic `NgramBKTree` versus `Naive` scenarios in total;
+- indexed BAM input parity for the streaming path;
+- paired indexed-BAM coverage for cross-reference flushing and final-pass mate
+  recovery;
+- a no-flag regression proving that dUMI still selects guarded `auto`
+  streaming and declares reordered output `SO:unsorted`;
+- Bash 3-compatible launchers and builds, portable Linux/macOS SHA-256 tooling,
+  and Linux Java 11/21 plus macOS Java 11 CI.
+
+The stable branch-specific CI history is available at
+[GitHub Actions](https://github.com/justinblethrow-cloud/dUMI/actions/workflows/ci.yml?query=branch%3Aoptimization%2Fstreaming-fastpath).
+
+### Refreshed streaming smoke benchmark
+
+Command:
+
+```
+./scripts/benchmark-streaming.sh 100000
+```
+
+| Mode | Records | Elapsed seconds | Maximum RSS (KiB) | Record SHA-256 |
+| --- | ---: | ---: | ---: | --- |
+| `off` | 100,000 | 1.42 | 272,608 | `6ca5d46803557b3bc48b30cad22b8e9b42793acfb721a864792dd2cf3ce6de47` |
+| `on` | 100,000 | 0.79 | 192,168 | `6ca5d46803557b3bc48b30cad22b8e9b42793acfb721a864792dd2cf3ce6de47` |
+
+For this synthetic workload, forced streaming reduced elapsed time by about
+44% and maximum RSS by about 30%, with identical record output. These figures
+remain a smoke-test regression signal rather than a production DGE claim.
+
 ## 2026-07-15 migration-remediation acceptance
 
 The remediation was validated in the migrated checkout at

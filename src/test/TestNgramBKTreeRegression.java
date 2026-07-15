@@ -28,6 +28,10 @@ public class TestNgramBKTreeRegression{
             }
         }
 
+        // Exercise the packed-key length limit and the 8-bit position fallback.
+        compareScenario(255, 16, 1);
+        compareScenario(256, 15, 1);
+
         System.out.println("Passed: randomized NgramBKTree regression matrix");
     }
 

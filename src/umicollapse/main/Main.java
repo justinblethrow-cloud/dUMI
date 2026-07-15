@@ -3,6 +3,7 @@ package umicollapse.main;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.ArrayList;
 import java.util.Arrays;
 
@@ -91,7 +92,7 @@ public class Main{
         boolean keepUnmapped = false;
 
         boolean trackClusters = false;
-        String streamingMode = System.getProperty("umicollapse.streaming.mode", "auto").toLowerCase();
+        String streamingMode = System.getProperty("umicollapse.streaming.mode", "auto").toLowerCase(Locale.ROOT);
         boolean streamingModeSpecified = false;
 
         String s = "-k";

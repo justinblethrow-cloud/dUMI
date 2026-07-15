@@ -13,9 +13,10 @@ else
     JAVA_BIN=java
 fi
 
-java_opts=()
 if [[ -n ${UMICOLLAPSE_JAVA_OPTS:-} ]]; then
+    java_opts=()
     read -r -a java_opts <<< "$UMICOLLAPSE_JAVA_OPTS"
+    exec "$JAVA_BIN" -server -Xss20M "${java_opts[@]}" -jar "$ROOT_DIR/umicollapse.jar" "$@"
 fi
 
-exec "$JAVA_BIN" -server "${java_opts[@]}" -jar "$ROOT_DIR/umicollapse.jar" "$@"
+exec "$JAVA_BIN" -server -Xss20M -jar "$ROOT_DIR/umicollapse.jar" "$@"

@@ -6,10 +6,11 @@ separates it from the upstream UMICollapse remote.
 
 ## Git lineage
 
-- Upstream remote: `origin` (`siddharthab/UMICollapse`)
-- Owned fork remote: `fork` (`justinblethrow-cloud/dUMI`)
+- Canonical upstream remote: `upstream` (`Daniel-Liu-c0deb0t/UMICollapse`)
+- Intermediate fork remote: `origin` (`siddharthab/UMICollapse`)
+- Owned dUMI remote: `fork` (`justinblethrow-cloud/dUMI`)
 - Upstream base: `aeacd82`, tagged `v1.1.0`
-- Active branch: `optimization/streaming-fastpath`
+- Active and GitHub default branch: `optimization/streaming-fastpath`
 - Guarded fast-path tag: `dge-streamingfastpath-guarded-20260522`
 
 Optimization commits carried by the migration:
@@ -19,11 +20,18 @@ Optimization commits carried by the migration:
 3. `5b52d6a` — explicit streaming-mode switch
 4. `56e63f2` — coordinate-order guard
 5. `f133fd8` — Java test launcher repair
+6. `77ea792` — migrated-fork hardening and acceptance gate
+7. `d59df6d` — Node 24-compatible CI actions
 
-The remediation following migration adds reproducible dependency/build
-controls, streaming safety fixes, regression fixtures, artifact provenance, and
-CI. The exact post-remediation commit is recorded by Git history rather than
-duplicated in this document.
+The default-branch hardening following migration adds cross-platform build
+controls, resource-safe streaming and paired-reader cleanup, indexed-BAM
+regressions, artifact provenance, and Linux/macOS CI. The exact final commit is
+recorded by Git history rather than duplicated in this document.
+
+The consolidated upstream submission is
+[UMICollapse PR #37](https://github.com/Daniel-Liu-c0deb0t/UMICollapse/pull/37).
+That PR defaults streaming to `off` for upstream compatibility; dUMI
+intentionally retains guarded `auto` streaming as its default.
 
 ## Producer and artifact contract
 
@@ -64,6 +72,7 @@ Before publishing a change, run:
 ```
 
 The gate requires checksum-verified dependencies, a clean Java 11-targeted
-build, a source-matching production JAR, unit/randomized equivalence tests, and
-streaming parity plus error-path tests. See `VALIDATION.md` for the latest
-recorded run.
+build, a source-matching production JAR, unit/randomized equivalence tests,
+indexed-BAM and paired-reader regressions, and streaming parity plus error-path
+tests. GitHub Actions runs it on Linux with Java 11 and 21 and on macOS with
+Java 11. See `VALIDATION.md` for the latest recorded run.

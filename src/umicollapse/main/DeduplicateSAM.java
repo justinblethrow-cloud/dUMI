@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.PriorityQueue;
 
 import java.util.stream.Stream;
@@ -36,7 +37,6 @@ import static umicollapse.util.Utils.HASH_CONST;
 
 public class DeduplicateSAM{
     private static final int MIN_ALIGN_MAP_CAPACITY = 1 << 16;
-    private static final int MAX_ALIGN_MAP_CAPACITY = 1 << 24;
     // Positive-strand unclipped starts can precede coordinate sort starts by soft/hard clipping.
     // Keep a conservative window and reject any record whose leading clipping exceeds it.
     private static final int STREAMING_POSITIVE_LAG = Integer.getInteger("umicollapse.streaming.positiveLag", 10000);
@@ -57,11 +57,23 @@ public class DeduplicateSAM{
 
     public void deduplicateAndMerge(File in, File out, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, boolean parallel, String umiSeparator, boolean paired, boolean removeUnpaired, boolean removeChimeric, boolean keepUnmapped, boolean trackClusters, String streamingMode){
         SAMRead.setDefaultUMIPattern(umiSeparator);
-        streamingMode = streamingMode.toLowerCase();
+        streamingMode = streamingMode.toLowerCase(Locale.ROOT);
 
         SamReader reader = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
+        boolean useStreaming;
 
-        if(canUseStreamingSingleEnd(reader, algo, dataClass, parallel, paired, trackClusters, streamingMode)){
+        try{
+            useStreaming = canUseStreamingSingleEnd(reader, algo, dataClass, parallel, paired, trackClusters, streamingMode);
+        }catch(RuntimeException | Error ex){
+            try{
+                reader.close();
+            }catch(Exception closeEx){
+                ex.addSuppressed(closeEx);
+            }
+            throw ex;
+        }
+
+        if(useStreaming){
             try{
                 deduplicateAndMergeSingleEndStreaming(in, out, reader, algo, dataClass, merge, umiLengthParam, k, percentage, keepUnmapped);
                 return;
@@ -75,7 +87,7 @@ public class DeduplicateSAM{
         }
 
         Writer writer = new Writer(in, out, reader, paired, false);
-        Map<Alignment, Map<BitSet, ReadFreq>> align = new HashMap<>(estimatedAlignmentMapCapacity(in));
+        Map<Alignment, Map<BitSet, ReadFreq>> align = new HashMap<>(MIN_ALIGN_MAP_CAPACITY);
 
         umiLength = umiLengthParam;
         int totalReadCount = 0;
@@ -341,8 +353,8 @@ public class DeduplicateSAM{
     }
 
     private void deduplicateAndMergeSingleEndStreaming(File in, File out, SamReader reader, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, boolean keepUnmapped){
-        File temporaryOut = createStreamingTemporaryFile(out);
-        Writer writer = new Writer(in, temporaryOut, reader, false, true);
+        File temporaryOut = null;
+        Writer writer = null;
         boolean writerClosed = false;
         Map<Alignment, StreamingAlignReads> active = new HashMap<>(MIN_ALIGN_MAP_CAPACITY);
         PriorityQueue<StreamingAlignReads> ready = new PriorityQueue<>((a, b) -> Integer.compare(a.flushStart, b.flushStart));
@@ -359,9 +371,11 @@ public class DeduplicateSAM{
         int lastReferenceIndex = Integer.MIN_VALUE;
         int lastAlignmentStart = Integer.MIN_VALUE;
 
-        System.out.println("Using coordinate-sorted single-end streaming fast path");
-
         try{
+            temporaryOut = createStreamingTemporaryFile(out);
+            writer = new Writer(in, temporaryOut, reader, false, true);
+            System.out.println("Using coordinate-sorted single-end streaming fast path");
+
             for(SAMRecord record : reader){
                 totalReadCount++;
 
@@ -418,16 +432,17 @@ public class DeduplicateSAM{
             writerClosed = true;
             promoteStreamingOutput(temporaryOut, out);
         }catch(RuntimeException | Error ex){
-            if(!writerClosed){
+            if(writer != null && !writerClosed){
                 try{
                     writer.close();
-                }catch(RuntimeException closeEx){
+                }catch(RuntimeException | Error closeEx){
                     ex.addSuppressed(closeEx);
                 }
             }
 
             try{
-                Files.deleteIfExists(temporaryOut.toPath());
+                if(temporaryOut != null)
+                    Files.deleteIfExists(temporaryOut.toPath());
             }catch(IOException deleteEx){
                 ex.addSuppressed(deleteEx);
             }
@@ -542,7 +557,7 @@ public class DeduplicateSAM{
     private static File createStreamingTemporaryFile(File out){
         File absoluteOut = out.getAbsoluteFile();
         File parent = absoluteOut.getParentFile();
-        String name = absoluteOut.getName().toLowerCase();
+        String name = absoluteOut.getName().toLowerCase(Locale.ROOT);
         String suffix = name.endsWith(".bam") ? ".bam" : ".sam";
 
         try{
@@ -562,18 +577,6 @@ public class DeduplicateSAM{
         }catch(IOException ex){
             throw new IllegalStateException("Could not move completed streaming output to " + out, ex);
         }
-    }
-
-    private static int estimatedAlignmentMapCapacity(File in){
-        long estimated = in.length() / 128L;
-
-        if(estimated < MIN_ALIGN_MAP_CAPACITY)
-            return MIN_ALIGN_MAP_CAPACITY;
-
-        if(estimated > MAX_ALIGN_MAP_CAPACITY)
-            return MAX_ALIGN_MAP_CAPACITY;
-
-        return (int)estimated;
     }
 
     // trade off speed for lower memory usage
@@ -832,19 +835,44 @@ public class DeduplicateSAM{
         private HashSet<ReversedRead> set;
 
         public Writer(File in, File out, SamReader r, boolean paired, boolean streaming){
-            if(paired){
-                this.reader = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
-                this.set = new HashSet<ReversedRead>();
+            SamReader pairedReader = null;
+            SAMFileWriter outputWriter = null;
+
+            try{
+                if(paired){
+                    pairedReader = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
+                    this.set = new HashSet<ReversedRead>();
+                }
+
+                if(streaming){
+                    SAMFileHeader header = r.getFileHeader().clone();
+                    header.setSortOrder(SAMFileHeader.SortOrder.unsorted);
+                    outputWriter = new SAMFileWriterFactory().makeSAMOrBAMWriter(header, true, out);
+                }else{
+                    outputWriter = new SAMFileWriterFactory().makeSAMOrBAMWriter(r.getFileHeader(), false, out);
+                }
+            }catch(RuntimeException | Error ex){
+                if(outputWriter != null){
+                    try{
+                        outputWriter.close();
+                    }catch(RuntimeException | Error closeEx){
+                        ex.addSuppressed(closeEx);
+                    }
+                }
+
+                if(pairedReader != null){
+                    try{
+                        pairedReader.close();
+                    }catch(Exception closeEx){
+                        ex.addSuppressed(closeEx);
+                    }
+                }
+
+                throw ex;
             }
 
-            if(streaming){
-                SAMFileHeader header = r.getFileHeader().clone();
-                header.setSortOrder(SAMFileHeader.SortOrder.unsorted);
-                this.writer = new SAMFileWriterFactory().makeSAMOrBAMWriter(header, true, out);
-            }else{
-                this.writer = new SAMFileWriterFactory().makeSAMOrBAMWriter(r.getFileHeader(), false, out);
-            }
-
+            this.reader = pairedReader;
+            this.writer = outputWriter;
             this.paired = paired;
         }
 
@@ -873,16 +901,35 @@ public class DeduplicateSAM{
         }
 
         public void close(){
-            if(paired) {
-                writeReversed(true);
+            Throwable failure = null;
+
+            try{
+                if(paired)
+                    writeReversed(true);
+            }catch(RuntimeException | Error ex){
+                failure = ex;
+            }
+
+            if(paired){
                 try{
                     reader.close();
-                }catch(Exception e){
-                    e.printStackTrace();
+                }catch(Exception ex){
+                    failure = combineFailures(failure, ex);
                 }
             }
 
-            writer.close();
+            try{
+                writer.close();
+            }catch(RuntimeException | Error ex){
+                failure = combineFailures(failure, ex);
+            }
+
+            if(failure instanceof RuntimeException)
+                throw (RuntimeException)failure;
+            if(failure instanceof Error)
+                throw (Error)failure;
+            if(failure != null)
+                throw new IllegalStateException("Could not close alignment resources", failure);
         }
 
         private void writeReversed(boolean fullPass){
@@ -896,28 +943,37 @@ public class DeduplicateSAM{
             else
                 iter = reader.query(ref, 0, 0, true);
 
-            while(iter.hasNext()){
-                SAMRecord record = iter.next();
+            try{
+                while(iter.hasNext()){
+                    SAMRecord record = iter.next();
 
-                if(!record.getReadUnmappedFlag()
-                        && record.getReadPairedFlag()
-                        && record.getSecondOfPairFlag()
-                        && !record.getMateUnmappedFlag()){
-                    ReversedRead read = new ReversedRead(
-                            record.getReadName(),
-                            record.getReferenceName(),
-                            record.getAlignmentStart()
-                    );
+                    if(!record.getReadUnmappedFlag()
+                            && record.getReadPairedFlag()
+                            && record.getSecondOfPairFlag()
+                            && !record.getMateUnmappedFlag()){
+                        ReversedRead read = new ReversedRead(
+                                record.getReadName(),
+                                record.getReferenceName(),
+                                record.getAlignmentStart()
+                        );
 
-                    if(set.contains(read)){
-                        writer.addAlignment(record);
-                        set.remove(read);
+                        if(set.contains(read)){
+                            writer.addAlignment(record);
+                            set.remove(read);
+                        }
                     }
                 }
+            }finally{
+                iter.close();
             }
+        }
 
-            iter.close();
+        private static Throwable combineFailures(Throwable first, Throwable next){
+            if(first == null)
+                return next;
 
+            first.addSuppressed(next);
+            return first;
         }
     }
 

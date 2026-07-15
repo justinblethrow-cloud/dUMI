@@ -26,8 +26,15 @@ fi
 rm -rf -- "$BUILD_DIR"
 mkdir -p "$MAIN_CLASSES/META-INF" "$TEST_CLASSES"
 
-mapfile -d '' main_sources < <(find "$ROOT_DIR/src/umicollapse" -name '*.java' -print0 | sort -z)
-mapfile -d '' test_sources < <(find "$ROOT_DIR/src/test" -name '*.java' -print0 | sort -z)
+main_sources=()
+while IFS= read -r source; do
+    main_sources+=("$source")
+done < <(find "$ROOT_DIR/src/umicollapse" -type f -name '*.java' | LC_ALL=C sort)
+
+test_sources=()
+while IFS= read -r source; do
+    test_sources+=("$source")
+done < <(find "$ROOT_DIR/src/test" -type f -name '*.java' | LC_ALL=C sort)
 
 "$JAVAC" --release 11 -cp "$CLASSPATH" -d "$MAIN_CLASSES" "${main_sources[@]}"
 "$JAVAC" --release 11 -cp "$MAIN_CLASSES:$CLASSPATH" -d "$TEST_CLASSES" "${test_sources[@]}"

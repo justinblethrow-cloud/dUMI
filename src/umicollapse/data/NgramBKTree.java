@@ -27,10 +27,13 @@ public class NgramBKTree implements DataStructure{
 
         useLongIntervalKeys = canUseLongIntervalKeys(umiLength, ngramSize, maxEdits);
 
-        if(useLongIntervalKeys)
+        if(useLongIntervalKeys){
+            m = null;
             longMap = new LongNodeMap(expectedNgramEntries(umiFreq.size(), maxEdits));
-        else
+        }else{
+            longMap = null;
             m = new HashMap<Interval, Node>(expectedNgramMapCapacity(umiFreq.size(), maxEdits));
+        }
 
         for(Map.Entry<BitSet, Integer> e : umiFreq.entrySet())
             insert(e.getKey(), e.getValue());
@@ -190,7 +193,7 @@ public class NgramBKTree implements DataStructure{
             keys = new long[capacity];
             values = new Node[capacity];
             mask = capacity - 1;
-            threshold = capacity * 2 / 3;
+            threshold = (int)((long)capacity * 2L / 3L);
         }
 
         Node get(long key){
@@ -235,6 +238,9 @@ public class NgramBKTree implements DataStructure{
         }
 
         private void resize(){
+            if(keys.length >= (1 << 30))
+                throw new IllegalStateException("NgramBKTree packed-key map exceeded its maximum capacity");
+
             long[] oldKeys = keys;
             Node[] oldValues = values;
             int newCapacity = keys.length << 1;
@@ -242,7 +248,7 @@ public class NgramBKTree implements DataStructure{
             keys = new long[newCapacity];
             values = new Node[newCapacity];
             mask = newCapacity - 1;
-            threshold = newCapacity * 2 / 3;
+            threshold = (int)((long)newCapacity * 2L / 3L);
             size = 0;
 
             for(int i = 0; i < oldValues.length; i++){

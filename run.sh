@@ -19,9 +19,10 @@ else
     JAVA_BIN=java
 fi
 
-java_opts=()
 if [[ -n ${UMICOLLAPSE_JAVA_OPTS:-} ]]; then
+    java_opts=()
     read -r -a java_opts <<< "$UMICOLLAPSE_JAVA_OPTS"
+    exec "$JAVA_BIN" "${java_opts[@]}" -cp "$CLASSPATH" "$@"
 fi
 
-exec "$JAVA_BIN" "${java_opts[@]}" -cp "$CLASSPATH" "$@"
+exec "$JAVA_BIN" -cp "$CLASSPATH" "$@"

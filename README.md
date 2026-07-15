@@ -27,28 +27,27 @@ The preprint paper is available **[here](https://www.biorxiv.org/content/10.1101
 ```
 
 ## Installation
-UMICollapse can be installed using `conda`:
-```
-conda install -c bioconda umicollapse
-```
-It is also available as a `nf-core` [module](https://nf-co.re/modules/umicollapse).
-(Thanks to [@CharlotteAnne](https://github.com/CharlotteAnne)!)
 
-Alternatively, clone this fork:
+Clone the maintained dUMI fork:
+
 ```
 git clone https://github.com/justinblethrow-cloud/dUMI.git
 cd dUMI
 ```
 
-Install a JDK 11 or newer, plus `curl`, `sha256sum`, and `unzip`. The build
-fetches the two runtime dependencies at their checksum-locked versions. To
-fetch or verify them independently, run:
+Install a JDK 11 or newer, plus `curl`, `unzip`, and either `sha256sum` (Linux)
+or `shasum` (macOS). The build fetches the two runtime dependencies at their
+checksum-locked versions. To fetch or verify them independently, run:
 
 ```
 ./scripts/bootstrap-dependencies.sh
 ```
 
 Dependency URLs and SHA-256 digests are recorded in `dependencies.lock`.
+
+Bioconda (`conda install -c bioconda umicollapse`) and the nf-core
+[`umicollapse` module](https://nf-co.re/modules/umicollapse) install upstream
+UMICollapse, not this dUMI fork.
 
 ## Example Run
 First, get some sample data from the UMI-tools repository. These aligned reads have their UMIs extracted and concatenated to the end of their read headers (you can do this with the `extract` tool in UMI-tools, using "`_`" as the UMI separator). Make sure you have `samtools` installed to index the BAM file.
@@ -110,7 +109,24 @@ Run the full local verification gate with:
 This rebuilds the JAR, verifies its embedded source hash and Java 11 bytecode
 target, runs assertion-based unit and randomized data-structure tests, and runs
 the SAM/BAM streaming equivalence and failure-safety matrix. `./test.sh` runs
-the tests without rebuilding. CI runs the same gate on Java 11 and Java 21.
+the tests without rebuilding. CI runs the same gate on Linux with Java 11 and
+Java 21, plus macOS with Java 11.
+
+The optimized `NgramBKTree`, UMI parsing, and clustering paths require no new
+runtime dependencies. For coordinate-sorted, single-end SAM/BAM inputs, dUMI's
+default guarded streaming mode bounds retained alignment groups to a coordinate
+window and safely retries the legacy path when its contract is not met.
+
+For a deterministic synthetic-input streaming smoke benchmark (GNU `time` or
+Homebrew `gtime` required), run:
+
+```
+./scripts/benchmark-streaming.sh 100000
+```
+
+The harness compares explicit streaming `on` and `off` modes and requires
+identical record hashes. It is a regression signal, not a production-scale
+performance claim.
 
 There are also small scripts for testing and debugging. For example, comparing two files to check if the UMIs are the same can be done with:
 ```
@@ -148,7 +164,8 @@ or running benchmarks:
 
 ## Java Virtual Machine Memory
 
-The launcher now uses JVM defaults instead of reserving 12 GB at startup. Set
+The launcher uses the JVM's heap defaults instead of reserving 12 GB at startup,
+while retaining a 20 MB stack for deeply recursive clusters. Set
 `UMICOLLAPSE_JAVA_OPTS` when a workload needs explicit tuning, for example:
 
 ```
