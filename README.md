@@ -86,7 +86,9 @@ Build Java 11-compatible bytecode and the production JAR with:
 
 The build starts from a clean `build/` directory, compiles test classes
 separately, packages production classes only, and embeds a source-tree hash in
-`umicollapse.jar`.
+`umicollapse.jar`. Runtime classpaths are derived from `dependencies.lock`, and
+both production and test sources are compiled for Java 11 with all compiler
+warnings treated as errors.
 
 ## Testing
 
@@ -97,10 +99,12 @@ Run the full local verification gate with:
 ```
 
 This rebuilds the JAR, verifies its embedded source hash and Java 11 bytecode
-target, runs assertion-based unit and randomized data-structure tests, and runs
-the SAM/BAM streaming equivalence and failure-safety matrix. `./test.sh` runs
-the tests without rebuilding. CI runs the same gate on Java 11 and Java 21 on
-Linux, plus Java 11 on macOS.
+target, runs assertion-based unit and randomized data-structure tests, and
+exercises CLI validation, transactional output, FASTQ, paired-read recovery,
+legacy/two-pass/parallel routes, tagging, and the SAM/BAM streaming
+equivalence and failure-safety matrix. `./test.sh` runs the tests without
+rebuilding. CI runs the same gate on Java 11 and Java 21 on Linux, plus Java 11
+on macOS.
 
 The optimized `NgramBKTree`, UMI parsing, and clustering paths require no new
 runtime dependencies. For coordinate-sorted, single-end SAM/BAM inputs, an
@@ -142,26 +146,33 @@ or running benchmarks:
 * `-p`: threshold percentage for identifying adjacent UMIs in the directional algorithm. Default: 0.5.
 * `-t`: parallelize the deduplication of each separate alignment position. Using this is discouraged as it is lacking many features. Default: false.
 * `-T`: parallelize the deduplication of one single alignment position. The data structure can only be `naive`, `bktree`, and `fenwickbktree`. Using this is discouraged as it is lacking many features. Default: false.
-* `--umi-sep`: separator string between the UMI and the rest of the read header. Default: `_`.
+* `--umi-sep`: literal separator string between the UMI and the rest of the read header. Default: `_`.
 * `--algo`: deduplication algorithm. Either `cc` for connected components, `adj` for adjacency, or `dir` for directional. Default: `dir`.
-* `--merge`: method for identifying which UMI to keep out of every two UMIs. Either `any`, `avgqual`, or `mapqual`. Default: `mapqual` for SAM/BAM mode, `avgqual` for FASTQ mode. `mapqual` resolves equal mapping-quality representatives by stable record content, so coordinate-tie input order cannot change the selected read.
-* `--data`: data structure used in deduplication. Either `naive`, `combo`, `ngram`, `delete`, `trie`, `bktree`, `sortbktree`, `ngrambktree`, `sortngrambktree`, or `fenwickbktree`. Default: `ngrambktree`.
+* `--merge`: method for identifying which UMI to keep out of every two UMIs. Either `any`, `avgqual`, or `mapqual`. Default: `mapqual` for SAM/BAM mode, `avgqual` for FASTQ mode. Equal-quality `mapqual` and `avgqual` representatives are resolved by stable record content. `any` intentionally retains encounter-order behavior.
+* `--data`: data structure used in deduplication. Either `naive`, `combo`, `ngram`, `delete`, `trie`, `bktree`, `sortbktree`, `ngrambktree`, `sortngrambktree`, or `fenwickbktree`. Default: `ngrambktree`; `-T` uses `bktree` unless `--data` is specified.
 * `--two-pass`: use a separate two-pass algorithm for SAM/BAM deduplication. This may be slightly slower, but it should use much less memory if the reads are approximately sorted by alignment coordinate. Default: false.
-* `--paired`: use paired-end mode, which deduplicates pairs of reads from a SAM/BAM file. The template length of each read pair, along with the alignment coordinate and UMI of the forwards read, are used to deduplicate read pairs. This is very memory intensive, and the input SAM/BAM files should be sorted. Default: false (single-end).
+* `--paired`: use paired-end mode, which deduplicates pairs of reads from a SAM/BAM file. The template length of each read pair, along with the alignment coordinate and UMI of the forwards read, are used to deduplicate read pairs. Indexed BAM uses bounded mate queries; SAM and unindexed BAM use sequential mate recovery. This is very memory intensive, and the input SAM/BAM files should be sorted. Default: false (single-end).
 * `--remove-unpaired`: remove unpaired reads during paired-end mode. Default: false.
 * `--remove-chimeric`: remove chimeric reads (pairs map to different references) during paired-end mode. Default: false.
 * `--keep-unmapped`: keep unmapped reads (no paired-end mode). Default: false.
 * `--tag`: tag reads that belong to the same group without removing them. In `fastq` mode, this will append `cluster_id=[unique ID for all reads of the same cluster]` to the header of every read. `cluster_size=[number of reads in the cluster]` will only be appended to the header of a consensus read for an entire group/cluster. `same_umi=[number of reads with the same UMI]` will be appended to the header of the "best" read of a group of reads with the exact same UMI (not allowing mismatches). In `sam`/`bam` mode, then all reads but the consensus reads will be marked with the duplicate flag. The `MI` attribute will be set with the `cluster_id` and the `RX` attribute will be set with the UMI of the consensus read. If applicable, the `cs` attribute is set with the `cluster_size`, and the `su` attribute is set with the `same_umi` count. For paired-end reads, only the forwards reads are tagged. This does not work with the `--two-pass` feature.
 * `--streaming-mode`: coordinate-sorted single-end SAM/BAM fast path. `off` (default) preserves the existing path. `auto` uses streaming when compatible and safely retries the existing path if coordinate order or the configured clipping window makes streaming unsafe. `on` requires streaming and fails without replacing the requested output when its contract is violated. Streaming is incompatible with paired, parallel, tagging, two-pass, and FASTQ modes. Streaming output is declared `SO:unsorted` because groups can be emitted outside coordinate order.
 
+Run `./umicollapse --help` for a compact option summary or
+`./umicollapse --version` for the artifact version. Invalid modes, values,
+strategy names, and unsupported combinations fail before processing. Every
+CLI route writes to a same-directory temporary file and replaces the requested
+destination only after successful completion; input and output may not name
+the same file or hard link.
+
 ## Java Virtual Machine Memory
 
-The launcher uses the JVM's heap defaults instead of reserving 12 GB at startup,
-while retaining a 20 MB stack for deeply recursive clusters. Set
+The launcher uses the JVM's heap and stack defaults instead of reserving fixed
+amounts at startup. Set
 `UMICOLLAPSE_JAVA_OPTS` when a workload needs explicit tuning, for example:
 
 ```
-UMICOLLAPSE_JAVA_OPTS='-Xms12G -Xmx15G -Xss20M' ./umicollapse bam ...
+UMICOLLAPSE_JAVA_OPTS='-Xms12G -Xmx15G' ./umicollapse bam ...
 ```
 
 For compatible coordinate-sorted single-end inputs, the opt-in streaming path

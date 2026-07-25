@@ -2,12 +2,26 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-CLASSPATH="$ROOT_DIR/build/test-classes:$ROOT_DIR/umicollapse.jar:$ROOT_DIR/lib/*"
 
 if [[ ! -d "$ROOT_DIR/build/test-classes" ]]; then
     echo "error: test classes are missing; run ./build.sh first" >&2
     exit 1
 fi
+
+classpath_entries=(
+    "$ROOT_DIR/build/test-classes"
+    "$ROOT_DIR/umicollapse.jar"
+)
+while read -r filename expected_sha256 url extra; do
+    [[ -z ${filename:-} || $filename == \#* ]] && continue
+    dependency="$ROOT_DIR/lib/$filename"
+    if [[ ! -f $dependency ]]; then
+        echo "error: locked dependency is missing: $filename; run ./build.sh first" >&2
+        exit 1
+    fi
+    classpath_entries+=("$dependency")
+done < "$ROOT_DIR/dependencies.lock"
+CLASSPATH=$(IFS=:; printf '%s' "${classpath_entries[*]}")
 
 if [[ -n ${JAVA:-} ]]; then
     JAVA_BIN=$JAVA
