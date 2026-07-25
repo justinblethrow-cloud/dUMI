@@ -90,7 +90,7 @@ public class Ngram implements DataStructure{
         return res;
     }
 
-    private static class Interval implements Comparable{
+    private static class Interval implements Comparable<Interval>{
         private BitSet s;
         private int lo, hi, hash;
 
@@ -134,21 +134,20 @@ public class Ngram implements DataStructure{
         }
 
         @Override
-        public int compareTo(Object o){
-            Interval other = (Interval)o;
+        public int compareTo(Interval other){
 
             if(lo != other.lo)
-                return lo - other.lo;
+                return Integer.compare(lo, other.lo);
 
             if(hi != other.hi)
-                return hi - other.hi;
+                return Integer.compare(hi, other.hi);
 
             for(int i = 0; i < hi - lo + 1; i++){
                 int a = get(i);
                 int b = other.get(i);
 
                 if(a != b)
-                    return a - b;
+                    return Integer.compare(a, b);
             }
 
             return 0;

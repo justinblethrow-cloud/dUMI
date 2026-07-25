@@ -27,7 +27,16 @@ public class Adjacency implements Algorithm{
             idx++;
         }
 
-        Arrays.sort(freq, (a, b) -> b.readFreq.freq - a.readFreq.freq);
+        Arrays.sort(freq, (a, b) -> {
+            int frequencyOrder = Integer.compare(b.readFreq.freq, a.readFreq.freq);
+
+            if(frequencyOrder != 0)
+                return frequencyOrder;
+
+            // Equal-frequency UMIs can remove overlapping neighborhoods.
+            // Resolve that choice from UMI content, not HashMap iteration.
+            return a.umi.compareTo(b.umi);
+        });
         data.init(m, umiLength, k);
 
         for(int i = 0; i < freq.length; i++){

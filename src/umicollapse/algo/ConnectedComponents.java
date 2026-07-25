@@ -5,6 +5,9 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.Set;
+import java.util.Collections;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 import umicollapse.util.BitSet;
 import umicollapse.data.DataStructure;
@@ -23,8 +26,10 @@ public class ConnectedComponents implements Algorithm{
 
         data.init(m, umiLength, k);
         List<Read> res = new ArrayList<>();
+        List<BitSet> sortedUmis = new ArrayList<>(reads.keySet());
+        Collections.sort(sortedUmis);
 
-        for(BitSet umi : reads.keySet()){
+        for(BitSet umi : sortedUmis){
             if(data.contains(umi)){
                 UmiFreq umiFreq = visitAndRemove(umi, reads, data, tracker, k);
                 tracker.track(umiFreq.umi, umiFreq.readFreq.read);
@@ -37,17 +42,29 @@ public class ConnectedComponents implements Algorithm{
 
     private UmiFreq visitAndRemove(BitSet u, Map<BitSet, ReadFreq> reads, DataStructure data, ClusterTracker tracker, int k){
         UmiFreq max = new UmiFreq(u, reads.get(u));
-        Set<BitSet> c = data.removeNear(u, k, Integer.MAX_VALUE);
-        tracker.addAll(c, reads);
+        Deque<BitSet> pending = new ArrayDeque<>();
+        Deque<BitSet> children = new ArrayDeque<>();
+        pending.push(u);
 
-        for(BitSet v : c){
-            if(u.equals(v))
-                continue;
+        while(!pending.isEmpty()){
+            BitSet current = pending.pop();
+            Set<BitSet> c = data.removeNear(current, k, Integer.MAX_VALUE);
+            tracker.addAll(c, reads);
 
-            UmiFreq r = visitAndRemove(v, reads, data, tracker, k);
+            for(BitSet v : c){
+                ReadFreq candidate = reads.get(v);
+                int frequencyOrder = Integer.compare(candidate.freq, max.readFreq.freq);
 
-            if(r.readFreq.freq > max.readFreq.freq)
-                max = r;
+                if(frequencyOrder > 0 || (frequencyOrder == 0 && v.compareTo(max.umi) < 0))
+                    max = new UmiFreq(v, candidate);
+
+                if(!current.equals(v))
+                    children.addLast(v);
+            }
+
+            // As above, removal supplies visited-state and prevents rescheduling.
+            while(!children.isEmpty())
+                pending.push(children.removeLast());
         }
 
         return max;

@@ -7,6 +7,8 @@ import java.util.Set;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 import umicollapse.util.BitSet;
 import umicollapse.data.DataStructure;
@@ -75,15 +77,46 @@ public class Directional implements Algorithm{
         return capacity > (1 << 30) ? (1 << 30) : (int)capacity;
     }
 
+    static int directionalThreshold(int frequency, float percentage){
+        long incrementedFrequency = (long)frequency + 1L;
+        float threshold = percentage * incrementedFrequency;
+
+        if(threshold >= Integer.MAX_VALUE)
+            return Integer.MAX_VALUE;
+        if(threshold <= Integer.MIN_VALUE)
+            return Integer.MIN_VALUE;
+
+        // Preserve the historical truncation toward zero for normal values.
+        return (int)threshold;
+    }
+
     private void visitAndRemove(BitSet u, Map<BitSet, ReadFreq> reads, DataStructure data, ClusterTracker tracker, int k, float percentage){
-        Set<BitSet> c = data.removeNear(u, k, (int)(percentage * (reads.get(u).freq + 1)));
-        tracker.addAll(c, reads);
+        Deque<BitSet> pending = new ArrayDeque<>();
+        Deque<BitSet> children = new ArrayDeque<>();
+        pending.push(u);
 
-        for(BitSet v : c){
-            if(u.equals(v))
-                continue;
+        while(!pending.isEmpty()){
+            BitSet current = pending.pop();
+            Set<BitSet> c = data.removeNear(
+                current,
+                k,
+                directionalThreshold(reads.get(current).freq, percentage)
+            );
+            tracker.addAll(c, reads);
 
-            visitAndRemove(v, reads, data, tracker, k, percentage);
+            /*
+             * removeNear removes every returned UMI before it is scheduled,
+             * so the data structure itself is the visited set. Buffering the
+             * children in iteration order and pushing them in reverse retains
+             * the recursive depth-first visitation order.
+             */
+            for(BitSet v : c){
+                if(!current.equals(v))
+                    children.addLast(v);
+            }
+
+            while(!children.isEmpty())
+                pending.push(children.removeLast());
         }
     }
 }

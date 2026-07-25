@@ -19,21 +19,39 @@ import umicollapse.util.Utils;
 public class TestOptimizedRegressions{
     public static void main(String[] args){
         testBoundedUnderscoreUMI();
+        testShortUnderscoreUMIRejected();
         testDirectionalSingletonInitializesData();
         System.out.println("Passed: optimized regression tests");
     }
 
     private static void testBoundedUnderscoreUMI(){
         SAMRecord record = new SAMRecord(new SAMFileHeader());
+        record.setReadName("read_ACGT-X");
+        SAMRead.setDefaultUMIPattern("_");
+        SAMRead read = new SAMRead(record);
+
+        BitSet actual = read.getUMI(2);
+        BitSet expected = Utils.toBitSet("AC");
+
+        if(read.getUMILength() != 4 || !actual.equals(expected))
+            throw new AssertionError("bounded underscore UMI parsing crossed a non-UMI delimiter");
+    }
+
+    private static void testShortUnderscoreUMIRejected(){
+        SAMRecord record = new SAMRecord(new SAMFileHeader());
         record.setReadName("read_AC-X");
         SAMRead.setDefaultUMIPattern("_");
         SAMRead read = new SAMRead(record);
 
-        BitSet actual = read.getUMI(4);
-        BitSet expected = Utils.toBitSet("AC");
-
-        if(read.getUMILength() != 2 || !actual.equals(expected))
-            throw new AssertionError("bounded underscore UMI parsing crossed a non-UMI delimiter");
+        try{
+            read.getUMI(4);
+            throw new AssertionError("short UMI was silently padded/aliased");
+        }catch(IllegalArgumentException expected){
+            if(!expected.getMessage().contains("read_AC-X")
+                    || !expected.getMessage().contains("available 2")
+                    || !expected.getMessage().contains("requested 4"))
+                throw new AssertionError("short-UMI diagnostic omitted read-specific lengths", expected);
+        }
     }
 
     private static void testDirectionalSingletonInitializesData(){

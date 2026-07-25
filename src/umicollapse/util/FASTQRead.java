@@ -1,6 +1,7 @@
 package umicollapse.util;
 
 import java.util.Arrays;
+import java.util.Objects;
 
 import htsjdk.samtools.fastq.FastqRecord;
 
@@ -57,12 +58,18 @@ public class FASTQRead extends Read{
 
     @Override
     public boolean equals(Object o){
+        if(this == o)
+            return true;
+
+        if(!(o instanceof FASTQRead))
+            return false;
+
         FASTQRead r = (FASTQRead)o;
 
         if(!seq.equals(r.seq))
             return false;
 
-        if(!desc.equals(r.desc))
+        if(!Objects.equals(desc, r.desc))
             return false;
 
         if(!Arrays.equals(qual, r.qual))
@@ -71,7 +78,48 @@ public class FASTQRead extends Read{
         return true;
     }
 
+    @Override
+    public int hashCode(){
+        int result = Objects.hashCode(desc);
+        result = 31 * result + seq.hashCode();
+        result = 31 * result + Arrays.hashCode(qual);
+        return result;
+    }
+
+    public int compareForTieBreak(FASTQRead other){
+        int cmp = compareNullableStrings(desc, other.desc);
+
+        if(cmp != 0)
+            return cmp;
+
+        cmp = seq.compareTo(other.seq);
+
+        if(cmp != 0)
+            return cmp;
+
+        int length = Math.min(qual.length, other.qual.length);
+
+        for(int i = 0; i < length; i++){
+            cmp = Integer.compare(Byte.toUnsignedInt(qual[i]), Byte.toUnsignedInt(other.qual[i]));
+
+            if(cmp != 0)
+                return cmp;
+        }
+
+        return Integer.compare(qual.length, other.qual.length);
+    }
+
     public FastqRecord toFASTQRecord(int length, int umiLength){
         return new FastqRecord(desc, Utils.toString(seq, length).substring(umiLength), "", Utils.toPhred33String(qual).substring(umiLength));
+    }
+
+    private static int compareNullableStrings(String a, String b){
+        if(a == b)
+            return 0;
+        if(a == null)
+            return -1;
+        if(b == null)
+            return 1;
+        return a.compareTo(b);
     }
 }

@@ -11,6 +11,7 @@ import java.util.Set;
 import umicollapse.data.DataStructure;
 import umicollapse.data.Naive;
 import umicollapse.data.NgramBKTree;
+import umicollapse.data.SortNgramBKTree;
 import umicollapse.util.BitSet;
 import umicollapse.util.Utils;
 
@@ -43,9 +44,11 @@ public class TestNgramBKTreeRegression{
             input.put(Utils.toBitSet(TestUtils.randUMI(umiLength, random)), 1 + random.nextInt(25));
 
         DataStructure baseline = new Naive();
-        DataStructure candidate = new NgramBKTree();
+        DataStructure[] candidates = {new NgramBKTree(), new SortNgramBKTree()};
         baseline.init(new HashMap<BitSet, Integer>(input), umiLength, maxEdits);
-        candidate.init(new HashMap<BitSet, Integer>(input), umiLength, maxEdits);
+
+        for(DataStructure candidate : candidates)
+            candidate.init(new HashMap<BitSet, Integer>(input), umiLength, maxEdits);
 
         List<BitSet> queries = new ArrayList<>(input.keySet());
         for(int i = 0; i < 20; i++)
@@ -56,23 +59,33 @@ public class TestNgramBKTreeRegression{
             int k = maxEdits == 0 ? 0 : random.nextInt(maxEdits + 1);
             int maxFreq = random.nextBoolean() ? Integer.MAX_VALUE : random.nextInt(26);
             Set<BitSet> expected = baseline.removeNear(query, k, maxFreq);
-            Set<BitSet> actual = candidate.removeNear(query, k, maxFreq);
 
-            if(!expected.equals(actual)){
-                throw new AssertionError(
-                        "NgramBKTree mismatch for length=" + umiLength
-                        + ", maxEdits=" + maxEdits
-                        + ", k=" + k
-                        + ", maxFreq=" + maxFreq
-                        + ", seed=" + seed
-                        + ", expected=" + expected
-                        + ", actual=" + actual
-                );
+            for(DataStructure candidate : candidates){
+                Set<BitSet> actual = candidate.removeNear(query, k, maxFreq);
+
+                if(!expected.equals(actual)){
+                    throw new AssertionError(
+                            candidate.getClass().getSimpleName()
+                            + " mismatch for length=" + umiLength
+                            + ", maxEdits=" + maxEdits
+                            + ", k=" + k
+                            + ", maxFreq=" + maxFreq
+                            + ", seed=" + seed
+                            + ", expected=" + expected
+                            + ", actual=" + actual
+                    );
+                }
             }
 
             for(BitSet original : input.keySet()){
-                if(baseline.contains(original) != candidate.contains(original))
-                    throw new AssertionError("NgramBKTree membership diverged after removal sequence");
+                for(DataStructure candidate : candidates){
+                    if(baseline.contains(original) != candidate.contains(original)){
+                        throw new AssertionError(
+                            candidate.getClass().getSimpleName()
+                            + " membership diverged after removal sequence"
+                        );
+                    }
+                }
             }
         }
     }

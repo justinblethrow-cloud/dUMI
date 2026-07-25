@@ -4,6 +4,8 @@ import java.util.Set;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 import umicollapse.util.BitSet;
 import static umicollapse.util.Utils.umiDist;
@@ -38,41 +40,71 @@ public class BKTree implements DataStructure{
         Set<BitSet> res = new HashSet<>();
 
         if(maxFreq != Integer.MAX_VALUE) // always remove the queried UMI
-            recursiveRemoveNear(umi, root, 0, Integer.MAX_VALUE, res);
+            removeNearIterative(umi, root, 0, Integer.MAX_VALUE, res);
 
-        recursiveRemoveNear(umi, root, k, maxFreq, res);
+        removeNearIterative(umi, root, k, maxFreq, res);
         return res;
     }
 
-    private void recursiveRemoveNear(BitSet umi, Node curr, int k, int maxFreq, Set<BitSet> res){
-        int dist = umiDist(umi, curr.getUMI());
+    private void removeNearIterative(BitSet umi, Node start, int k, int maxFreq, Set<BitSet> res){
+        Deque<RemovalFrame> stack = new ArrayDeque<>();
+        stack.push(new RemovalFrame(start));
 
-        if(dist <= k && curr.exists() && curr.getFreq() <= maxFreq){
-            res.add(curr.getUMI());
-            curr.setExists(false);
-            s.remove(curr.getUMI());
-        }
+        while(!stack.isEmpty()){
+            RemovalFrame frame = stack.peek();
 
-        boolean subtreeExists = curr.exists();
-        int minFreq = curr.exists() ? curr.getFreq() : Integer.MAX_VALUE;
+            if(!frame.entered){
+                int dist = umiDist(umi, frame.node.getUMI());
 
-        if(curr.hasNodes()){
-            int lo = Math.max(dist - k, 0);
-            int hi = Math.min(dist + k, umiLength);
-
-            for(int i = 0; i < umiLength + 1; i++){
-                if(curr.subtreeExists(i)){
-                    if(i >= lo && i <= hi && curr.minFreq(i) <= maxFreq)
-                        recursiveRemoveNear(umi, curr.get(i), k, maxFreq, res);
-
-                    minFreq = Math.min(minFreq, curr.minFreq(i));
-                    subtreeExists |= curr.subtreeExists(i);
+                if(dist <= k && frame.node.exists() && frame.node.getFreq() <= maxFreq){
+                    res.add(frame.node.getUMI());
+                    frame.node.setExists(false);
+                    s.remove(frame.node.getUMI());
                 }
+
+                frame.subtreeExists = frame.node.exists();
+                frame.minFreq = frame.node.exists()
+                    ? frame.node.getFreq()
+                    : Integer.MAX_VALUE;
+                frame.lo = Math.max(dist - k, 0);
+                frame.hi = Math.min(dist + k, umiLength);
+                frame.childCount = frame.node.hasNodes() ? umiLength + 1 : 0;
+                frame.entered = true;
+            }
+
+            boolean descended = false;
+
+            while(frame.nextChild < frame.childCount){
+                int childIndex = frame.nextChild++;
+
+                if(!frame.node.subtreeExists(childIndex))
+                    continue;
+
+                if(childIndex >= frame.lo
+                        && childIndex <= frame.hi
+                        && frame.node.minFreq(childIndex) <= maxFreq){
+                    stack.push(new RemovalFrame(frame.node.get(childIndex)));
+                    descended = true;
+                    break;
+                }
+
+                frame.minFreq = Math.min(frame.minFreq, frame.node.minFreq(childIndex));
+                frame.subtreeExists |= frame.node.subtreeExists(childIndex);
+            }
+
+            if(descended)
+                continue;
+
+            frame.node.setSubtreeExists(frame.subtreeExists);
+            frame.node.setMinFreq(frame.minFreq);
+            stack.pop();
+
+            if(!stack.isEmpty()){
+                RemovalFrame parent = stack.peek();
+                parent.minFreq = Math.min(parent.minFreq, frame.minFreq);
+                parent.subtreeExists |= frame.subtreeExists;
             }
         }
-
-        curr.setSubtreeExists(subtreeExists);
-        curr.setMinFreq(minFreq);
     }
 
     private void insert(BitSet umi, int freq){
@@ -99,28 +131,50 @@ public class BKTree implements DataStructure{
         return res;
     }
 
-    private double[] depth(Node curr){
-        double[] a = {0.0f, 0.0f, 0.0f}; // num leaf nodes, max depth, depth sum
+    private double[] depth(Node start){
+        double[] result = new double[3]; // num leaf nodes, max depth, depth sum
+        Deque<DepthFrame> pending = new ArrayDeque<>();
+        pending.push(new DepthFrame(start, 1));
 
-        boolean isLeaf = true;
+        while(!pending.isEmpty()){
+            DepthFrame frame = pending.pop();
+            boolean isLeaf = true;
 
-        for(int i = 0; i < umiLength + 1; i++){
-            if(curr.hasNode(i)){
-                double[] b = depth(curr.get(i));
-                a[0] += b[0];
-                a[1] = Math.max(a[1], b[1] + 1);
-                a[2] += b[2] + b[0];
-                isLeaf = false;
+            for(int i = umiLength; i >= 0; i--){
+                if(frame.node.hasNode(i)){
+                    pending.push(new DepthFrame(frame.node.get(i), frame.depth + 1));
+                    isLeaf = false;
+                }
+            }
+
+            if(isLeaf){
+                result[0] += 1;
+                result[1] = Math.max(result[1], frame.depth);
+                result[2] += frame.depth;
             }
         }
 
-        if(isLeaf){
-            a[0] += 1;
-            a[1] += 1;
-            a[2] += 1;
-        }
+        return result;
+    }
 
-        return a;
+    private static class DepthFrame{
+        private final Node node;
+        private final int depth;
+
+        DepthFrame(Node node, int depth){
+            this.node = node;
+            this.depth = depth;
+        }
+    }
+
+    private static class RemovalFrame{
+        private final Node node;
+        private boolean entered, subtreeExists;
+        private int lo, hi, nextChild, childCount, minFreq;
+
+        RemovalFrame(Node node){
+            this.node = node;
+        }
     }
 
     private static class Node{

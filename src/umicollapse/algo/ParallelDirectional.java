@@ -7,6 +7,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.stream.IntStream;
 
 import umicollapse.util.BitSet;
@@ -34,7 +36,14 @@ public class ParallelDirectional implements ParallelAlgorithm{
             idx++;
         }
 
-        Arrays.parallelSort(freq, (a, b) -> b.readFreq.freq - a.readFreq.freq);
+        Arrays.parallelSort(freq, (a, b) -> {
+            int frequencyOrder = Integer.compare(b.readFreq.freq, a.readFreq.freq);
+
+            if(frequencyOrder != 0)
+                return frequencyOrder;
+
+            return a.umi.compareTo(b.umi);
+        });
         data.init(m, umiLength, k);
 
         List<Set<BitSet>> adjIdx = new ArrayList<>();
@@ -43,7 +52,14 @@ public class ParallelDirectional implements ParallelAlgorithm{
             adjIdx.add(null);
 
         IntStream.range(0, freq.length).parallel()
-            .forEach(i -> adjIdx.set(i, data.near(freq[i].umi, k, (int)(percentage * (freq[i].readFreq.freq + 1)))));
+            .forEach(i -> adjIdx.set(
+                i,
+                data.near(
+                    freq[i].umi,
+                    k,
+                    Directional.directionalThreshold(freq[i].readFreq.freq, percentage)
+                )
+            ));
 
         Map<BitSet, Set<BitSet>> adj = new HashMap<>();
 
@@ -54,7 +70,7 @@ public class ParallelDirectional implements ParallelAlgorithm{
 
         for(int i = 0; i < freq.length; i++){
             if(!visited.contains(freq[i].umi)){
-                visitAndRemove(freq[i].umi, reads, adj, visited);
+                visitAndRemove(freq[i].umi, adj, visited);
                 res.add(freq[i].readFreq.read);
             }
         }
@@ -62,18 +78,28 @@ public class ParallelDirectional implements ParallelAlgorithm{
         return res;
     }
 
-    private void visitAndRemove(BitSet u, Map<BitSet, ReadFreq> reads, Map<BitSet, Set<BitSet>> adj, Set<BitSet> visited){
-        if(visited.contains(u))
-            return;
+    private void visitAndRemove(BitSet u, Map<BitSet, Set<BitSet>> adj, Set<BitSet> visited){
+        Deque<BitSet> pending = new ArrayDeque<>();
+        Deque<BitSet> children = new ArrayDeque<>();
+        // Discovery is query-local: mark on enqueue so dense graphs cannot
+        // accumulate duplicate pending entries before a node is visited.
+        Set<BitSet> scheduled = new HashSet<>();
+        scheduled.add(u);
+        pending.push(u);
 
-        Set<BitSet> c = adj.get(u);
-        visited.add(u);
+        while(!pending.isEmpty()){
+            BitSet current = pending.pop();
 
-        for(BitSet v : c){
-            if(u.equals(v))
+            if(!visited.add(current))
                 continue;
 
-            visitAndRemove(v, reads, adj, visited);
+            for(BitSet v : adj.get(current)){
+                if(!current.equals(v) && !visited.contains(v) && scheduled.add(v))
+                    children.addLast(v);
+            }
+
+            while(!children.isEmpty())
+                pending.push(children.removeLast());
         }
     }
 }

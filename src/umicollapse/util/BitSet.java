@@ -2,7 +2,7 @@ package umicollapse.util;
 
 import java.util.Arrays;
 
-public class BitSet implements Comparable{
+public class BitSet implements Comparable<BitSet>{
     private static final int CHUNK_SIZE = 64;
 
     private long[] bits;
@@ -15,13 +15,15 @@ public class BitSet implements Comparable{
         this.recalcHash = true;
     }
 
-    private BitSet(long[] bits){
+    private BitSet(long[] bits, long[] nBits){
         this.bits = bits;
+        this.nBits = nBits;
         this.recalcHash = true;
     }
 
-    private BitSet(long[] bits, int hash){
+    private BitSet(long[] bits, long[] nBits, int hash){
         this.bits = bits;
+        this.nBits = nBits;
         this.recalcHash = false;
         this.hash = hash;
     }
@@ -42,6 +44,7 @@ public class BitSet implements Comparable{
         if(nBits == null)
             nBits = new long[bits.length];
 
+        recalcHash = true;
         int i = idx / CHUNK_SIZE;
         int j = idx % CHUNK_SIZE;
         nBits[i] = bit ? (nBits[i] | (1L << j)) : (nBits[i] & ~(1L << j));
@@ -101,7 +104,7 @@ public class BitSet implements Comparable{
             return false;
 
         for(int i = 0; i < bits.length; i++){
-            if(bits[i] != o.bits[i])
+            if(bits[i] != o.bits[i] || nBitsAt(i) != o.nBitsAt(i))
                 return false;
         }
 
@@ -109,25 +112,38 @@ public class BitSet implements Comparable{
     }
 
     @Override
-    public int compareTo(Object o){
-        BitSet other = (BitSet)o;
-
+    public int compareTo(BitSet other){
         if(bits.length != other.bits.length)
-            return bits.length - other.bits.length;
+            return Integer.compare(bits.length, other.bits.length);
 
         for(int i = 0; i < bits.length; i++){
             if(bits[i] != other.bits[i])
                 return Long.compare(bits[i], other.bits[i]);
         }
 
+        // nBits is normally derivable from the encoded bases, but it remains
+        // part of distance semantics and must therefore participate in the
+        // total order just as it does in equality.
+        for(int i = 0; i < bits.length; i++){
+            long thisNBits = nBitsAt(i);
+            long otherNBits = other.nBitsAt(i);
+
+            if(thisNBits != otherNBits)
+                return Long.compare(thisNBits, otherNBits);
+        }
+
         return 0;
     }
 
+    @Override
     public BitSet clone(){
+        long[] clonedBits = Arrays.copyOf(bits, bits.length);
+        long[] clonedNBits = nBits == null ? null : Arrays.copyOf(nBits, nBits.length);
+
         if(recalcHash)
-            return new BitSet(Arrays.copyOf(bits, bits.length));
+            return new BitSet(clonedBits, clonedNBits);
         else
-            return new BitSet(Arrays.copyOf(bits, bits.length), hash);
+            return new BitSet(clonedBits, clonedNBits, hash);
     }
 
     @Override
@@ -135,14 +151,23 @@ public class BitSet implements Comparable{
         if(recalcHash){
             long h = 1234L; // same as Java's built-in BitSet hash function
 
-            for(int i = bits.length; --i >= 0;)
+            for(int i = bits.length; --i >= 0;){
                 h ^= bits[i] * (i + 1L);
+
+                long nChunk = nBitsAt(i);
+                if(nChunk != 0L)
+                    h ^= Long.rotateLeft(nChunk, 17) * (i + 1L);
+            }
 
             hash = (int)((h >> 32) ^ h);
             recalcHash = false;
         }
 
         return hash;
+    }
+
+    private long nBitsAt(int idx){
+        return nBits == null ? 0L : nBits[idx];
     }
 
     @Override

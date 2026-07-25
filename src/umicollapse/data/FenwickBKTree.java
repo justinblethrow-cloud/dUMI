@@ -5,6 +5,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.TreeMap;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 import umicollapse.util.BitSet;
 import static umicollapse.util.Utils.umiDist;
@@ -47,7 +49,7 @@ public class FenwickBKTree implements DataStructure{
             int freqIdx = freqs.size();
 
             for(; freqIdx > 0; freqIdx -= freqIdx & (-freqIdx))
-                recursiveRemoveNear(umi, fenwick[freqIdx], 0, res);
+                removeNearIterative(umi, fenwick[freqIdx], 0, res);
         }
 
         Map.Entry<Integer, Integer> floorEntry = freqs.floorEntry(maxFreq);
@@ -58,37 +60,61 @@ public class FenwickBKTree implements DataStructure{
         int freqIdx = floorEntry.getValue() + 1;
 
         for(; freqIdx > 0; freqIdx -= freqIdx & (-freqIdx))
-            recursiveRemoveNear(umi, fenwick[freqIdx], k, res);
+            removeNearIterative(umi, fenwick[freqIdx], k, res);
 
         return res;
     }
 
-    private void recursiveRemoveNear(BitSet umi, Node curr, int k, Set<BitSet> res){
-        int dist = umiDist(umi, curr.getUMI());
-        boolean exists = s.contains(curr.getUMI());
+    private void removeNearIterative(BitSet umi, Node start, int k, Set<BitSet> res){
+        Deque<RemovalFrame> stack = new ArrayDeque<>();
+        stack.push(new RemovalFrame(start));
 
-        if(dist <= k && exists){
-            res.add(curr.getUMI());
-            s.remove(curr.getUMI());
-        }
+        while(!stack.isEmpty()){
+            RemovalFrame frame = stack.peek();
 
-        boolean subtreeExists = exists;
+            if(!frame.entered){
+                int dist = umiDist(umi, frame.node.getUMI());
+                boolean exists = s.contains(frame.node.getUMI());
 
-        if(curr.hasNodes()){
-            int lo = Math.max(dist - k, 0);
-            int hi = Math.min(dist + k, umiLength);
-
-            for(int i = 0; i < umiLength + 1; i++){
-                if(curr.subtreeExists(i)){
-                    if(i >= lo && i <= hi)
-                        recursiveRemoveNear(umi, curr.get(i), k, res);
-
-                    subtreeExists |= curr.subtreeExists(i);
+                if(dist <= k && exists){
+                    res.add(frame.node.getUMI());
+                    s.remove(frame.node.getUMI());
+                    exists = false;
                 }
-            }
-        }
 
-        curr.setSubtreeExists(subtreeExists);
+                frame.subtreeExists = exists;
+                frame.lo = Math.max(dist - k, 0);
+                frame.hi = Math.min(dist + k, umiLength);
+                frame.childCount = frame.node.hasNodes() ? umiLength + 1 : 0;
+                frame.entered = true;
+            }
+
+            boolean descended = false;
+
+            while(frame.nextChild < frame.childCount){
+                int childIndex = frame.nextChild++;
+
+                if(!frame.node.subtreeExists(childIndex))
+                    continue;
+
+                if(childIndex >= frame.lo && childIndex <= frame.hi){
+                    stack.push(new RemovalFrame(frame.node.get(childIndex)));
+                    descended = true;
+                    break;
+                }
+
+                frame.subtreeExists = true;
+            }
+
+            if(descended)
+                continue;
+
+            frame.node.setSubtreeExists(frame.subtreeExists);
+            stack.pop();
+
+            if(!stack.isEmpty())
+                stack.peek().subtreeExists |= frame.subtreeExists;
+        }
     }
 
     private void insert(BitSet umi, int freq){
@@ -133,28 +159,50 @@ public class FenwickBKTree implements DataStructure{
         return res;
     }
 
-    private double[] depth(Node curr){
-        double[] a = new double[3]; // num leaf nodes, max depth, depth sum
+    private double[] depth(Node start){
+        double[] result = new double[3]; // num leaf nodes, max depth, depth sum
+        Deque<DepthFrame> pending = new ArrayDeque<>();
+        pending.push(new DepthFrame(start, 1));
 
-        boolean isLeaf = true;
+        while(!pending.isEmpty()){
+            DepthFrame frame = pending.pop();
+            boolean isLeaf = true;
 
-        for(int i = 0; i < umiLength + 1; i++){
-            if(curr.hasNode(i)){
-                double[] b = depth(curr.get(i));
-                a[0] += b[0];
-                a[1] = Math.max(a[1], b[1] + 1);
-                a[2] += b[2] + b[0];
-                isLeaf = false;
+            for(int i = umiLength; i >= 0; i--){
+                if(frame.node.hasNode(i)){
+                    pending.push(new DepthFrame(frame.node.get(i), frame.depth + 1));
+                    isLeaf = false;
+                }
+            }
+
+            if(isLeaf){
+                result[0] += 1;
+                result[1] = Math.max(result[1], frame.depth);
+                result[2] += frame.depth;
             }
         }
 
-        if(isLeaf){
-            a[0] += 1;
-            a[1] += 1;
-            a[2] += 1;
-        }
+        return result;
+    }
 
-        return a;
+    private static class DepthFrame{
+        private final Node node;
+        private final int depth;
+
+        DepthFrame(Node node, int depth){
+            this.node = node;
+            this.depth = depth;
+        }
+    }
+
+    private static class RemovalFrame{
+        private final Node node;
+        private boolean entered, subtreeExists;
+        private int lo, hi, nextChild, childCount;
+
+        RemovalFrame(Node node){
+            this.node = node;
+        }
     }
 
     private static class Node{
