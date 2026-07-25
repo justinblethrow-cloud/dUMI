@@ -8,6 +8,8 @@ import htsjdk.samtools.SAMRecordIterator;
 import htsjdk.samtools.SAMFileWriter;
 import htsjdk.samtools.SAMFileWriterFactory;
 import htsjdk.samtools.SAMFileHeader;
+import htsjdk.samtools.CigarElement;
+import htsjdk.samtools.CigarOperator;
 
 import java.util.Map;
 import java.util.HashMap;
@@ -41,9 +43,9 @@ public class DeduplicateSAM{
     // Keep a conservative window and reject any record whose leading clipping exceeds it.
     private static final int STREAMING_POSITIVE_LAG = Integer.getInteger("umicollapse.streaming.positiveLag", 10000);
 
-    private int avgUMICount;
+    private long avgUMICount;
     private int maxUMICount;
-    private int dedupedCount;
+    private long dedupedCount;
     private int umiLength;
 
     public void deduplicateAndMerge(File in, File out, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, boolean parallel, String umiSeparator, boolean paired, boolean removeUnpaired, boolean removeChimeric, boolean keepUnmapped, boolean trackClusters){
@@ -56,6 +58,19 @@ public class DeduplicateSAM{
     }
 
     public void deduplicateAndMerge(File in, File out, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, boolean parallel, String umiSeparator, boolean paired, boolean removeUnpaired, boolean removeChimeric, boolean keepUnmapped, boolean trackClusters, String streamingMode){
+        OutputTransaction.runAlignment(
+                in,
+                out,
+                stagedOutput -> deduplicateAndMergeCore(
+                        in, stagedOutput, algo, dataClass, merge, umiLengthParam, k,
+                        percentage, parallel, umiSeparator, paired, removeUnpaired,
+                        removeChimeric, keepUnmapped, trackClusters, streamingMode
+                )
+        );
+    }
+
+    void deduplicateAndMergeCore(File in, File out, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, boolean parallel, String umiSeparator, boolean paired, boolean removeUnpaired, boolean removeChimeric, boolean keepUnmapped, boolean trackClusters, String streamingMode){
+        validateKnownK(k, umiLengthParam);
         SAMRead.setDefaultUMIPattern(umiSeparator);
         streamingMode = streamingMode.toLowerCase(Locale.ROOT);
 
@@ -86,106 +101,15 @@ public class DeduplicateSAM{
             }
         }
 
-        Writer writer = new Writer(in, out, reader, paired, false);
         Map<Alignment, Map<BitSet, ReadFreq>> align = new HashMap<>(MIN_ALIGN_MAP_CAPACITY);
 
         umiLength = umiLengthParam;
-        int totalReadCount = 0;
-        int unmapped = 0;
-        int unpaired = 0;
-        int chimeric = 0;
-        int readCount = 0;
-
-        for(SAMRecord record : reader){
-            // always skip the reversed read
-            if(paired && record.getReadPairedFlag() && record.getSecondOfPairFlag())
-                continue;
-
-            totalReadCount++;
-
-            if(record.getReadUnmappedFlag()){ // discard unmapped reads
-                unmapped++;
-                if(keepUnmapped)
-                    writer.write(record);
-                continue;
-            }
-
-            if(paired){
-                if(!record.getReadPairedFlag()){
-                    unpaired++;
-
-                    if(removeUnpaired)
-                        continue;
-                }
-
-                if(record.getReadPairedFlag() && record.getMateUnmappedFlag()){
-                    unmapped++;
-                    continue;
-                }
-
-                if(record.getReadPairedFlag() && !record.getReferenceName().equals(record.getMateReferenceName())){
-                    chimeric++;
-
-                    if(removeChimeric)
-                        continue;
-                }
-            }
-
-            Alignment alignment = null;
-
-            if(paired){
-                alignment = new PairedAlignment(
-                        record.getReadNegativeStrandFlag(),
-                        record.getReadNegativeStrandFlag() ? record.getUnclippedEnd() : record.getUnclippedStart(),
-                        record.getReferenceName(),
-                        record.getInferredInsertSize()
-                );
-            }else{
-                alignment = new Alignment(
-                        record.getReadNegativeStrandFlag(),
-                        record.getReadNegativeStrandFlag() ? record.getUnclippedEnd() : record.getUnclippedStart(),
-                        record.getReferenceName()
-                );
-            }
-
-            Map<BitSet, ReadFreq> umiRead = align.get(alignment);
-
-            if(umiRead == null){
-                umiRead = new HashMap<BitSet, ReadFreq>(4);
-                align.put(alignment, umiRead);
-            }
-
-            Read read = new SAMRead(record);
-            BitSet umi = read.getUMI(umiLength);
-
-            if(umiLength == -1)
-                umiLength = read.getUMILength();
-
-            ReadFreq prev = umiRead.get(umi);
-
-            if(prev != null){
-                prev.read = merge.merge(read, prev.read);
-                prev.freq++;
-            }else{
-                umiRead.put(umi, new ReadFreq(read, 1));
-            }
-
-            readCount++;
-        }
-
-        try{
-            reader.close();
-        }catch(Exception e){
-            e.printStackTrace();
-        }
-
-        reader = null;
-
-        System.gc(); // attempt to clear up memory before deduplicating
-
-        System.out.println("Done reading input file into memory!");
-
-        int alignPosCount = align.size();
+        long totalReadCount = 0L;
+        long unmapped = 0L;
+        long unpaired = 0L;
+        long chimeric = 0L;
+        long readCount = 0L;
+        int alignPosCount;
         avgUMICount = 0;
         maxUMICount = 0;
         dedupedCount = 0;
@@ -193,115 +117,160 @@ public class DeduplicateSAM{
 
         final Map<Alignment, ClusterTracker> clusterTrackers = trackClusters ? new HashMap<Alignment, ClusterTracker>() : null;
 
-        Stream<Map.Entry<Alignment, Map<BitSet, ReadFreq>>> stream =
-            parallel ? align.entrySet().parallelStream() : ((paired && !trackClusters) ? align.entrySet().stream().sorted((a, b) -> a.getKey().getRef().compareTo(b.getKey().getRef())) : align.entrySet().stream());
+        try(SamReader ownedReader = reader;
+                Writer writer = new Writer(in, out, ownedReader, paired, false)){
+            try(SAMRecordIterator records = ownedReader.iterator()){
+                while(records.hasNext()){
+                    SAMRecord record = records.next();
 
-        stream.forEach(e -> {
-            List<Read> deduped;
-            Data data = null;
+                    // always skip the reversed read
+                    if(paired && record.getReadPairedFlag() && record.getSecondOfPairFlag())
+                        continue;
 
-            try{
-                data = dataClass.getDeclaredConstructor().newInstance();
-            }catch(Exception ex){
-                ex.printStackTrace();
-            }
+                    totalReadCount = Math.incrementExact(totalReadCount);
 
-            ClusterTracker currTracker = new ClusterTracker(trackClusters);
+                    if(record.getReadUnmappedFlag()){ // discard unmapped reads
+                        unmapped = Math.incrementExact(unmapped);
+                        if(keepUnmapped)
+                            writer.write(record);
+                        continue;
+                    }
 
-            if(algo instanceof Algorithm)
-                deduped = ((Algorithm)algo).apply(e.getValue(), (DataStructure)data, currTracker, umiLength, k, percentage);
-            else
-                deduped = ((ParallelAlgorithm)algo).apply(e.getValue(), (ParallelDataStructure)data, currTracker, umiLength, k, percentage);
+                    if(paired){
+                        if(!record.getReadPairedFlag()){
+                            unpaired = Math.incrementExact(unpaired);
 
-            synchronized(lock){
-                currTracker.setOffset(dedupedCount);
+                            if(removeUnpaired)
+                                continue;
+                        }
 
-                avgUMICount += e.getValue().size();
-                maxUMICount = Math.max(maxUMICount, e.getValue().size());
-                dedupedCount += deduped.size();
+                        if(record.getReadPairedFlag() && record.getMateUnmappedFlag()){
+                            unmapped = Math.incrementExact(unmapped);
+                            continue;
+                        }
 
-                if(trackClusters){
-                    clusterTrackers.put(e.getKey(), currTracker);
-                }else{
-                    for(Read read : deduped)
-                        writer.write(((SAMRead)read).toSAMRecord());
+                        if(record.getReadPairedFlag() && !record.getReferenceName().equals(record.getMateReferenceName())){
+                            chimeric = Math.incrementExact(chimeric);
+
+                            if(removeChimeric)
+                                continue;
+                        }
+                    }
+
+                    Alignment alignment = alignmentFor(record, paired);
+                    Map<BitSet, ReadFreq> umiRead = align.get(alignment);
+
+                    if(umiRead == null){
+                        umiRead = new HashMap<BitSet, ReadFreq>(4);
+                        align.put(alignment, umiRead);
+                    }
+
+                    Read read = new SAMRead(record);
+                    BitSet umi = getValidatedUMI(read, k);
+                    ReadFreq previous = umiRead.get(umi);
+
+                    if(previous != null){
+                        previous.read = merge.merge(read, previous.read);
+                        previous.increment();
+                    }else{
+                        umiRead.put(umi, new ReadFreq(read, 1));
+                    }
+
+                    readCount = Math.incrementExact(readCount);
                 }
             }
-        });
 
-        // second pass to tag reads with their cluster and other stats
-        if(trackClusters){
-            System.gc(); // attempt to clear up memory before second pass
+            System.gc(); // attempt to clear up memory before deduplicating
 
-            System.out.println("Done with the first pass for tracking clusters!");
+            System.out.println("Done reading input file into memory!");
+            alignPosCount = align.size();
 
-            SamReader reader2 = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
+            Stream<Map.Entry<Alignment, Map<BitSet, ReadFreq>>> stream =
+                parallel ? align.entrySet().parallelStream() : ((paired && !trackClusters) ? align.entrySet().stream().sorted((a, b) -> a.getKey().getRef().compareTo(b.getKey().getRef())) : align.entrySet().stream());
 
-            for(SAMRecord record : reader2){
-                if(record.getReadUnmappedFlag()) // discard unmapped reads
-                    continue;
+            stream.forEach(e -> {
+                Data data = instantiateData(dataClass);
+                ClusterTracker currTracker = new ClusterTracker(trackClusters);
+                List<Read> deduped;
 
-                if(paired && ((removeUnpaired && !record.getReadPairedFlag()) // discard unpaired
-                            || (record.getReadPairedFlag() && record.getSecondOfPairFlag()) // ignore reversed reads
-                            || (record.getReadPairedFlag() && record.getMateUnmappedFlag()) // discard unmapped reads
-                            || (removeChimeric && record.getReadPairedFlag()
-                                && !record.getReferenceName().equals(record.getMateReferenceName())))){ // discard chimeric reads
-                    continue;
+                if(algo instanceof Algorithm)
+                    deduped = ((Algorithm)algo).apply(e.getValue(), (DataStructure)data, currTracker, umiLength, k, percentage);
+                else
+                    deduped = ((ParallelAlgorithm)algo).apply(e.getValue(), (ParallelDataStructure)data, currTracker, umiLength, k, percentage);
+
+                synchronized(lock){
+                    currTracker.setOffset(dedupedCount);
+
+                    avgUMICount = Math.addExact(avgUMICount, e.getValue().size());
+                    maxUMICount = Math.max(maxUMICount, e.getValue().size());
+                    dedupedCount = Math.addExact(dedupedCount, deduped.size());
+
+                    if(trackClusters){
+                        clusterTrackers.put(e.getKey(), currTracker);
+                    }else{
+                        for(Read dedupedRead : deduped)
+                            writer.write(((SAMRead)dedupedRead).toSAMRecord());
+                    }
                 }
+            });
 
-                Alignment alignment = null;
+            // second pass to tag reads with their cluster and other stats
+            if(trackClusters){
+                System.gc(); // attempt to clear up memory before second pass
 
-                if(paired){
-                    alignment = new PairedAlignment(
-                            record.getReadNegativeStrandFlag(),
-                            record.getReadNegativeStrandFlag() ? record.getUnclippedEnd() : record.getUnclippedStart(),
-                            record.getReferenceName(),
-                            record.getInferredInsertSize()
-                    );
-                }else{
-                    alignment = new Alignment(
-                            record.getReadNegativeStrandFlag(),
-                            record.getReadNegativeStrandFlag() ? record.getUnclippedEnd() : record.getUnclippedStart(),
-                            record.getReferenceName()
-                    );
+                System.out.println("Done with the first pass for tracking clusters!");
+
+                try(SamReader secondReader = SamReaderFactory.makeDefault()
+                            .validationStringency(ValidationStringency.SILENT)
+                            .open(in);
+                        SAMRecordIterator records = secondReader.iterator()){
+                    while(records.hasNext()){
+                        SAMRecord record = records.next();
+
+                        if(record.getReadUnmappedFlag()) // discard unmapped reads
+                            continue;
+
+                        if(paired && ((removeUnpaired && !record.getReadPairedFlag()) // discard unpaired
+                                    || (record.getReadPairedFlag() && record.getSecondOfPairFlag()) // ignore reversed reads
+                                    || (record.getReadPairedFlag() && record.getMateUnmappedFlag()) // discard unmapped reads
+                                    || (removeChimeric && record.getReadPairedFlag()
+                                        && !record.getReferenceName().equals(record.getMateReferenceName())))){ // discard chimeric reads
+                            continue;
+                        }
+
+                        Alignment alignment = alignmentFor(record, paired);
+                        ClusterTracker currTracker = clusterTrackers.get(alignment);
+                        Map<BitSet, ReadFreq> map = align.get(alignment);
+
+                        Read read = new SAMRead(record);
+                        BitSet umi = read.getUMI(umiLength);
+
+                        int id = currTracker.getId(umi);
+                        ClusterTracker.ClusterStats stats = currTracker.getStats(id);
+                        int absId = Math.addExact(id, currTracker.getOffset());
+                        SAMRecord record2 = record.deepCopy();
+                        ReadFreq readFreq = map.get(umi);
+
+                        record2.setAttribute("MI", Integer.toString(absId));
+                        record2.setAttribute("RX", Utils.toString(stats.getUMI(), umiLength));
+
+                        if(stats.getUMI().equals(umi) && stats.getRead().equals(read)){
+                            record2.setAttribute("cs", stats.getFreq());
+                            record2.setAttribute("su", readFreq.freq);
+                        }else{
+                            record2.setDuplicateReadFlag(true);
+
+                            if(readFreq.read.equals(read))
+                                record2.setAttribute("su", readFreq.freq);
+                        }
+
+                        writer.write(record2);
+                    }
                 }
-
-                ClusterTracker currTracker = clusterTrackers.get(alignment);
-                Map<BitSet, ReadFreq> map = align.get(alignment);
-
-                Read read = new SAMRead(record);
-                BitSet umi = read.getUMI(umiLength);
-
-                int id = currTracker.getId(umi);
-                ClusterTracker.ClusterStats stats = currTracker.getStats(id);
-                int absId = id + currTracker.getOffset();
-                SAMRecord record2 = record.deepCopy();
-                ReadFreq readFreq = map.get(umi);
-
-                record2.setAttribute("MI", absId + "");
-                record2.setAttribute("RX", Utils.toString(stats.getUMI(), umiLength));
-
-                if(stats.getUMI().equals(umi) && stats.getRead().equals(read)){
-                    record2.setAttribute("cs", stats.getFreq());
-                    record2.setAttribute("su", readFreq.freq);
-                }else{
-                    record2.setDuplicateReadFlag(true);
-
-                    if(readFreq.read.equals(read))
-                        record2.setAttribute("su", readFreq.freq);
-                }
-
-                writer.write(record2);
             }
-
-            try{
-                reader2.close();
-            }catch(Exception e){
-                e.printStackTrace();
-            }
+        }catch(IOException ex){
+            throw new IllegalStateException("Could not close SAM input resources for " + in, ex);
         }
-
-        writer.close();
 
         System.out.println("Number of input reads\t" + totalReadCount);
         System.out.println("Number of removed unmapped reads\t" + unmapped);
@@ -320,6 +289,84 @@ public class DeduplicateSAM{
             System.out.println("Number of groups of reads\t" + dedupedCount);
         else
             System.out.println("Number of reads after deduplicating\t" + dedupedCount);
+    }
+
+    private static void validateKnownK(int k, int requestedUmiLength){
+        if(k < 0)
+            throw new IllegalArgumentException("k must be non-negative, observed " + k);
+
+        if(requestedUmiLength == 0 || requestedUmiLength < -1){
+            throw new IllegalArgumentException(
+                    "UMI length must be -1 for autodetection or positive, observed "
+                    + requestedUmiLength
+            );
+        }
+
+        if(requestedUmiLength > 0)
+            validateEffectiveK(k, requestedUmiLength);
+    }
+
+    private static void validateEffectiveK(int k, int effectiveUmiLength){
+        if(k >= effectiveUmiLength){
+            throw new IllegalArgumentException(
+                    "k must satisfy 0 <= k < effective UMI length; observed k="
+                    + k + " and effective UMI length=" + effectiveUmiLength
+            );
+        }
+    }
+
+    private BitSet getValidatedUMI(Read read, int k){
+        if(umiLength == -1){
+            int detectedLength = read.getUMILength();
+            validateEffectiveK(k, detectedLength);
+            umiLength = detectedLength;
+        }
+
+        return read.getUMI(umiLength);
+    }
+
+    private static Data instantiateData(Class<? extends Data> dataClass){
+        try{
+            return dataClass.getDeclaredConstructor().newInstance();
+        }catch(ReflectiveOperationException ex){
+            throw new IllegalStateException(
+                    "Could not instantiate data structure " + dataClass.getName(),
+                    ex
+            );
+        }
+    }
+
+    private static Alignment alignmentFor(SAMRecord record, boolean paired){
+        if(paired){
+            return new PairedAlignment(
+                    record.getReadNegativeStrandFlag(),
+                    record.getReadNegativeStrandFlag()
+                            ? record.getUnclippedEnd()
+                            : record.getUnclippedStart(),
+                    record.getReferenceName(),
+                    record.getInferredInsertSize()
+            );
+        }
+
+        return singleEndAlignment(record);
+    }
+
+    private static int incrementFrequency(int frequency){
+        try{
+            return Math.incrementExact(frequency);
+        }catch(ArithmeticException ex){
+            throw new ArithmeticException(
+                    "Read frequency exceeds the supported maximum of " + Integer.MAX_VALUE
+            );
+        }
+    }
+
+    private static void closeSamReader(SamReader reader, File input){
+        try{
+            reader.close();
+        }catch(IOException ex){
+            throw new IllegalStateException("Could not close SAM input " + input, ex);
+        }
     }
 
     private boolean canUseStreamingSingleEnd(SamReader reader, Algo algo, Class<? extends Data> dataClass, boolean parallel, boolean paired, boolean trackClusters, String streamingMode){
@@ -356,6 +403,7 @@ public class DeduplicateSAM{
         File temporaryOut = null;
         Writer writer = null;
         boolean writerClosed = false;
+        boolean readerClosed = false;
         Map<Alignment, StreamingAlignReads> active = new HashMap<>(MIN_ALIGN_MAP_CAPACITY);
         PriorityQueue<StreamingAlignReads> ready = new PriorityQueue<>((a, b) -> Integer.compare(a.flushStart, b.flushStart));
 
@@ -363,10 +411,10 @@ public class DeduplicateSAM{
         avgUMICount = 0;
         maxUMICount = 0;
         dedupedCount = 0;
-        int totalReadCount = 0;
-        int unmapped = 0;
-        int readCount = 0;
-        int alignPosCount = 0;
+        long totalReadCount = 0L;
+        long unmapped = 0L;
+        long readCount = 0L;
+        long alignPosCount = 0L;
         String currentRef = null;
         int lastReferenceIndex = Integer.MIN_VALUE;
         int lastAlignmentStart = Integer.MIN_VALUE;
@@ -376,66 +424,78 @@ public class DeduplicateSAM{
             writer = new Writer(in, temporaryOut, reader, false, true);
             System.out.println("Using coordinate-sorted single-end streaming fast path");
 
-            for(SAMRecord record : reader){
-                totalReadCount++;
+            try(SAMRecordIterator records = reader.iterator()){
+                while(records.hasNext()){
+                    SAMRecord record = records.next();
+                    totalReadCount = Math.incrementExact(totalReadCount);
 
-                if(record.getReadUnmappedFlag()){
-                    unmapped++;
-                    if(keepUnmapped)
-                        writer.write(record);
-                    continue;
+                    if(record.getReadUnmappedFlag()){
+                        unmapped = Math.incrementExact(unmapped);
+                        if(keepUnmapped)
+                            writer.write(record);
+                        continue;
+                    }
+
+                    String recordRef = record.getReferenceName();
+                    int referenceIndex = record.getReferenceIndex();
+                    int alignmentStart = record.getAlignmentStart();
+
+                    if(referenceIndex < lastReferenceIndex || (referenceIndex == lastReferenceIndex && alignmentStart < lastAlignmentStart)){
+                        throw new StreamingFallbackException(
+                                "Streaming mode requires records to be in coordinate order, but read " + record.getReadName()
+                                + " at " + recordRef + ":" + alignmentStart
+                                + " follows referenceIndex=" + lastReferenceIndex + " start=" + lastAlignmentStart
+                                + ". Sort the input BAM with samtools sort before UMICollapse, or run with --streaming-mode off."
+                        );
+                    }
+
+                    lastReferenceIndex = referenceIndex;
+                    lastAlignmentStart = alignmentStart;
+
+                    if(currentRef == null){
+                        currentRef = recordRef;
+                    }else if(!currentRef.equals(recordRef)){
+                        flushAllStreamingGroups(active, ready, writer, algo, dataClass, k, percentage);
+                        currentRef = recordRef;
+                    }
+
+                    Alignment alignment = streamingSingleEndAlignment(record);
+                    flushReadyStreamingGroups(active, ready, writer, algo, dataClass, k, percentage, alignmentStart);
+
+                    StreamingAlignReads alignReads = active.get(alignment);
+
+                    if(alignReads == null){
+                        alignReads = new StreamingAlignReads(alignment, streamingFlushStart(alignment));
+                        active.put(alignment, alignReads);
+                        ready.add(alignReads);
+                        alignPosCount = Math.incrementExact(alignPosCount);
+                    }
+
+                    addStreamingRead(alignReads, record, merge, k);
+                    readCount = Math.incrementExact(readCount);
                 }
-
-                String recordRef = record.getReferenceName();
-                int referenceIndex = record.getReferenceIndex();
-                int alignmentStart = record.getAlignmentStart();
-
-                if(referenceIndex < lastReferenceIndex || (referenceIndex == lastReferenceIndex && alignmentStart < lastAlignmentStart)){
-                    throw new StreamingFallbackException(
-                            "Streaming mode requires records to be in coordinate order, but read " + record.getReadName()
-                            + " at " + recordRef + ":" + alignmentStart
-                            + " follows referenceIndex=" + lastReferenceIndex + " start=" + lastAlignmentStart
-                            + ". Sort the input BAM with samtools sort before UMICollapse, or run with --streaming-mode off."
-                    );
-                }
-
-                lastReferenceIndex = referenceIndex;
-                lastAlignmentStart = alignmentStart;
-
-                if(currentRef == null){
-                    currentRef = recordRef;
-                }else if(!currentRef.equals(recordRef)){
-                    flushAllStreamingGroups(active, ready, writer, algo, dataClass, k, percentage);
-                    currentRef = recordRef;
-                }
-
-                Alignment alignment = singleEndAlignment(record);
-                validateStreamingLag(record, alignment);
-                flushReadyStreamingGroups(active, ready, writer, algo, dataClass, k, percentage, alignmentStart);
-
-                StreamingAlignReads alignReads = active.get(alignment);
-
-                if(alignReads == null){
-                    alignReads = new StreamingAlignReads(alignment, streamingFlushStart(alignment));
-                    active.put(alignment, alignReads);
-                    ready.add(alignReads);
-                    alignPosCount++;
-                }
-
-                addRead(alignReads.umiRead, record, merge);
-                readCount++;
             }
 
             flushAllStreamingGroups(active, ready, writer, algo, dataClass, k, percentage);
 
-            writer.close();
             writerClosed = true;
+            writer.close();
+            readerClosed = true;
+            closeSamReader(reader, in);
             promoteStreamingOutput(temporaryOut, out);
         }catch(RuntimeException | Error ex){
             if(writer != null && !writerClosed){
                 try{
                     writer.close();
-                }catch(RuntimeException closeEx){
+                }catch(RuntimeException | Error closeEx){
+                    ex.addSuppressed(closeEx);
+                }
+            }
+
+            if(!readerClosed){
+                try{
+                    closeSamReader(reader, in);
+                }catch(RuntimeException | Error closeEx){
                     ex.addSuppressed(closeEx);
                 }
             }
@@ -448,12 +508,6 @@ public class DeduplicateSAM{
             }
 
             throw ex;
-        }finally{
-            try{
-                reader.close();
-            }catch(Exception e){
-                e.printStackTrace();
-            }
         }
 
         System.out.println("Number of input reads\t" + totalReadCount);
@@ -486,40 +540,77 @@ public class DeduplicateSAM{
     }
 
     private void flushStreamingGroup(StreamingAlignReads alignReads, Writer writer, Algo algo, Class<? extends Data> dataClass, int k, float percentage){
-        List<Read> deduped;
-        Data data = null;
+        int umiCount = alignReads.umiCount();
 
-        try{
-            data = dataClass.getDeclaredConstructor().newInstance();
-        }catch(Exception ex){
-            ex.printStackTrace();
+        avgUMICount = Math.addExact(avgUMICount, umiCount);
+        maxUMICount = Math.max(maxUMICount, umiCount);
+
+        // Exact-UMI merging has already selected the representative. For the
+        // built-in algorithm/data-structure pairs covered by
+        // canBypassSingletonClustering(), a one-UMI group cannot change. Custom
+        // extensions still execute the general clustering path.
+        if(umiCount == 1 && canBypassSingletonClustering(algo, dataClass)){
+            writer.write(((SAMRead)alignReads.firstRead).toSAMRecord());
+            dedupedCount = Math.incrementExact(dedupedCount);
+            return;
         }
 
-        deduped = ((Algorithm)algo).apply(alignReads.umiRead, (DataStructure)data, new ClusterTracker(false), umiLength, k, percentage);
+        Data data = instantiateData(dataClass);
+        Map<BitSet, ReadFreq> umiRead = alignReads.materialize();
 
-        avgUMICount += alignReads.umiRead.size();
-        maxUMICount = Math.max(maxUMICount, alignReads.umiRead.size());
-        dedupedCount += deduped.size();
+        List<Read> deduped = ((Algorithm)algo).apply(
+                umiRead,
+                (DataStructure)data,
+                new ClusterTracker(false),
+                umiLength,
+                k,
+                percentage
+        );
+
+        dedupedCount = Math.addExact(dedupedCount, deduped.size());
 
         for(Read read : deduped)
             writer.write(((SAMRead)read).toSAMRecord());
     }
 
-    private void addRead(Map<BitSet, ReadFreq> umiRead, SAMRecord record, Merge merge){
+    private void addStreamingRead(StreamingAlignReads alignReads, SAMRecord record, Merge merge, int k){
         Read read = new SAMRead(record);
-        BitSet umi = read.getUMI(umiLength);
+        BitSet umi = getValidatedUMI(read, k);
 
-        if(umiLength == -1)
-            umiLength = read.getUMILength();
+        if(alignReads.umiRead != null){
+            ReadFreq previous = alignReads.umiRead.get(umi);
 
-        ReadFreq prev = umiRead.get(umi);
-
-        if(prev != null){
-            prev.read = merge.merge(read, prev.read);
-            prev.freq++;
-        }else{
-            umiRead.put(umi, new ReadFreq(read, 1));
+            if(previous != null){
+                previous.read = merge.merge(read, previous.read);
+                previous.increment();
+            }else{
+                alignReads.umiRead.put(umi, new ReadFreq(read, 1));
+            }
+            return;
         }
+
+        if(alignReads.firstUmi == null){
+            alignReads.firstUmi = umi;
+            alignReads.firstRead = read;
+            alignReads.firstFrequency = 1;
+            return;
+        }
+
+        if(alignReads.firstUmi.equals(umi)){
+            alignReads.firstRead = merge.merge(read, alignReads.firstRead);
+            alignReads.firstFrequency = incrementFrequency(alignReads.firstFrequency);
+            return;
+        }
+
+        alignReads.umiRead = new HashMap<BitSet, ReadFreq>(4);
+        alignReads.umiRead.put(
+                alignReads.firstUmi,
+                new ReadFreq(alignReads.firstRead, alignReads.firstFrequency)
+        );
+        alignReads.umiRead.put(umi, new ReadFreq(read, 1));
+        alignReads.firstUmi = null;
+        alignReads.firstRead = null;
+        alignReads.firstFrequency = 0;
     }
 
     private static Alignment singleEndAlignment(SAMRecord record){
@@ -530,20 +621,66 @@ public class DeduplicateSAM{
         );
     }
 
-    private static void validateStreamingLag(SAMRecord record, Alignment alignment){
-        if(alignment.strand)
-            return;
+    private static Alignment streamingSingleEndAlignment(SAMRecord record){
+        if(record.getReadNegativeStrandFlag()){
+            long unclippedEnd = (long)record.getAlignmentStart()
+                    + record.getCigar().getReferenceLength() - 1L;
+            List<CigarElement> elements = record.getCigar().getCigarElements();
 
+            for(int i = elements.size() - 1; i >= 0; i--){
+                CigarElement element = elements.get(i);
+                CigarOperator operator = element.getOperator();
+
+                if(operator != CigarOperator.S && operator != CigarOperator.H)
+                    break;
+
+                unclippedEnd += element.getLength();
+            }
+
+            if(unclippedEnd > Integer.MAX_VALUE){
+                throw new StreamingFallbackException(
+                        "Streaming mode cannot represent the reverse-strand unclipped end for read "
+                        + record.getReadName() + " because it exceeds " + Integer.MAX_VALUE
+                        + "; use --streaming-mode off."
+                );
+            }
+
+            return new Alignment(true, (int)unclippedEnd, record.getReferenceName());
+        }
+
+        Alignment alignment = singleEndAlignment(record);
         long leadingClip = (long)record.getAlignmentStart() - alignment.coord;
 
-        if(leadingClip > STREAMING_POSITIVE_LAG){
-            throw new StreamingFallbackException(
-                    "Streaming positive-lag window is too small for read " + record.getReadName()
-                    + " with " + leadingClip + " leading clipped bases; rerun with "
-                    + "-Dumicollapse.streaming.positiveLag=<at-least-" + leadingClip + ">"
-                    + " or use --streaming-mode off."
-            );
-        }
+        if(leadingClip <= STREAMING_POSITIVE_LAG)
+            return alignment;
+
+        throw new StreamingFallbackException(
+                "Streaming positive-lag window is too small for read " + record.getReadName()
+                + " with " + leadingClip + " leading clipped bases; rerun with "
+                + "-Dumicollapse.streaming.positiveLag=<at-least-" + leadingClip + ">"
+                + " or use --streaming-mode off."
+        );
+    }
+
+    private static boolean canBypassSingletonClustering(
+            Algo algo,
+            Class<? extends Data> dataClass){
+        Class<?> algorithmClass = algo.getClass();
+        boolean builtInAlgorithm = algorithmClass == Directional.class
+                || algorithmClass == Adjacency.class
+                || algorithmClass == ConnectedComponents.class;
+        boolean builtInData = dataClass == Naive.class
+                || dataClass == Combo.class
+                || dataClass == Ngram.class
+                || dataClass == SymmetricDelete.class
+                || dataClass == Trie.class
+                || dataClass == BKTree.class
+                || dataClass == SortBKTree.class
+                || dataClass == NgramBKTree.class
+                || dataClass == SortNgramBKTree.class
+                || dataClass == FenwickBKTree.class;
+
+        return builtInAlgorithm && builtInData;
     }
 
     private static int streamingFlushStart(Alignment alignment){
@@ -558,7 +695,9 @@ public class DeduplicateSAM{
         File absoluteOut = out.getAbsoluteFile();
         File parent = absoluteOut.getParentFile();
         String name = absoluteOut.getName().toLowerCase(Locale.ROOT);
-        String suffix = name.endsWith(".bam") ? ".bam" : ".sam";
+        // Match SAMFileWriterFactory's legacy inference: only an explicit .sam
+        // destination is text SAM; every other extension is binary BAM.
+        String suffix = name.endsWith(".sam") ? ".sam" : ".bam";
 
         try{
             return File.createTempFile(".umicollapse-stream-", suffix, parent);
@@ -582,182 +721,154 @@ public class DeduplicateSAM{
     // trade off speed for lower memory usage
     // input should be sorted based on alignment for best results
     public void deduplicateAndMergeTwoPass(File in, File out, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, String umiSeparator, boolean paired, boolean removeUnpaired, boolean removeChimeric, boolean keepUnmapped, boolean trackClusters){
-        SamReader firstPass = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
-        Writer writer = new Writer(in, out, firstPass, paired, false);
-        Map<Alignment, AlignReads> align = new HashMap<>(1 << 16);
-        int totalReadCount = 0;
-        int unmapped = 0;
-        int unpaired = 0;
-        int chimeric = 0;
-        int readCount = 0;
+        OutputTransaction.runAlignment(
+                in,
+                out,
+                stagedOutput -> deduplicateAndMergeTwoPassCore(
+                        in, stagedOutput, algo, dataClass, merge, umiLengthParam, k,
+                        percentage, umiSeparator, paired, removeUnpaired,
+                        removeChimeric, keepUnmapped, trackClusters
+                )
+        );
+    }
 
-        // first pass to figure out where each alignment position ends
-        for(SAMRecord record : firstPass){
-            // always skip the reversed read
-            if(paired && record.getReadPairedFlag() && record.getSecondOfPairFlag())
-                continue;
-
-            totalReadCount++;
-
-            if(record.getReadUnmappedFlag()){ // discard unmapped reads
-                unmapped++;
-                if(keepUnmapped)
-                    writer.write(record);
-                continue;
-            }
-
-            if(paired){
-                if(!record.getReadPairedFlag()){
-                    unpaired++;
-
-                    if(removeUnpaired)
-                        continue;
-                }
-
-                if(record.getReadPairedFlag() && record.getMateUnmappedFlag()){
-                    unmapped++;
-                    continue;
-                }
-
-                if(record.getReadPairedFlag() && !record.getReferenceName().equals(record.getMateReferenceName())){
-                    chimeric++;
-
-                    if(removeChimeric)
-                        continue;
-                }
-            }
-
-            Alignment alignment = null;
-
-            if(paired){
-                alignment = new PairedAlignment(
-                        record.getReadNegativeStrandFlag(),
-                        record.getReadNegativeStrandFlag() ? record.getUnclippedEnd() : record.getUnclippedStart(),
-                        record.getReferenceName(),
-                        record.getInferredInsertSize()
-                );
-            }else{
-                alignment = new Alignment(
-                        record.getReadNegativeStrandFlag(),
-                        record.getReadNegativeStrandFlag() ? record.getUnclippedEnd() : record.getUnclippedStart(),
-                        record.getReferenceName()
-                );
-            }
-
-            if(!align.containsKey(alignment))
-                align.put(alignment, new AlignReads());
-
-            align.get(alignment).latest = readCount;
-            readCount++;
-        }
-
-        try{
-            firstPass.close();
-        }catch(Exception e){
-            e.printStackTrace();
-        }
-
-        firstPass = null;
-
-        System.gc(); // attempt to clear up memory before second pass
-
-        System.out.println("Done with the first pass!");
-
+    void deduplicateAndMergeTwoPassCore(File in, File out, Algo algo, Class<? extends Data> dataClass, Merge merge, int umiLengthParam, int k, float percentage, String umiSeparator, boolean paired, boolean removeUnpaired, boolean removeChimeric, boolean keepUnmapped, boolean trackClusters){
+        validateKnownK(k, umiLengthParam);
         SAMRead.setDefaultUMIPattern(umiSeparator);
 
-        SamReader reader = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
-
+        Map<Alignment, AlignReads> align = new HashMap<>(1 << 16);
+        long totalReadCount = 0L;
+        long unmapped = 0L;
+        long unpaired = 0L;
+        long chimeric = 0L;
+        long readCount = 0L;
+        int alignPosCount;
         umiLength = umiLengthParam;
-        int idx = 0;
-        int alignPosCount = align.size();
         avgUMICount = 0;
         maxUMICount = 0;
         dedupedCount = 0;
 
-        for(SAMRecord record : reader){
-            if(record.getReadUnmappedFlag()) // discard unmapped reads
-                continue;
+        try(SamReader firstPass = SamReaderFactory.makeDefault()
+                    .validationStringency(ValidationStringency.SILENT)
+                    .open(in);
+                Writer writer = new Writer(in, out, firstPass, paired, false)){
+            // first pass to figure out where each alignment position ends
+            try(SAMRecordIterator records = firstPass.iterator()){
+                while(records.hasNext()){
+                    SAMRecord record = records.next();
 
-            if(paired && ((removeUnpaired && !record.getReadPairedFlag()) // discard unpaired
-                        || (record.getReadPairedFlag() && record.getSecondOfPairFlag()) // ignore reversed reads
-                        || (record.getReadPairedFlag() && record.getMateUnmappedFlag()) // discard unmapped reads
-                        || (removeChimeric && record.getReadPairedFlag()
-                            && !record.getReferenceName().equals(record.getMateReferenceName())))){ // discard chimeric reads
-                continue;
-            }
+                    // always skip the reversed read
+                    if(paired && record.getReadPairedFlag() && record.getSecondOfPairFlag())
+                        continue;
 
-            Alignment alignment = null;
+                    totalReadCount = Math.incrementExact(totalReadCount);
 
-            if(paired){
-                alignment = new PairedAlignment(
-                        record.getReadNegativeStrandFlag(),
-                        record.getReadNegativeStrandFlag() ? record.getUnclippedEnd() : record.getUnclippedStart(),
-                        record.getReferenceName(),
-                        record.getInferredInsertSize()
-                );
-            }else{
-                alignment = new Alignment(
-                        record.getReadNegativeStrandFlag(),
-                        record.getReadNegativeStrandFlag() ? record.getUnclippedEnd() : record.getUnclippedStart(),
-                        record.getReferenceName()
-                );
-            }
+                    if(record.getReadUnmappedFlag()){ // discard unmapped reads
+                        unmapped = Math.incrementExact(unmapped);
+                        if(keepUnmapped)
+                            writer.write(record);
+                        continue;
+                    }
 
-            AlignReads alignReads = align.get(alignment);
+                    if(paired){
+                        if(!record.getReadPairedFlag()){
+                            unpaired = Math.incrementExact(unpaired);
 
-            if(alignReads.umiRead == null)
-                alignReads.umiRead = new HashMap<BitSet, ReadFreq>(4);
+                            if(removeUnpaired)
+                                continue;
+                        }
 
-            Read read = new SAMRead(record);
-            BitSet umi = read.getUMI(umiLength);
+                        if(record.getReadPairedFlag() && record.getMateUnmappedFlag()){
+                            unmapped = Math.incrementExact(unmapped);
+                            continue;
+                        }
 
-            if(umiLength == -1)
-                umiLength = read.getUMILength();
+                        if(record.getReadPairedFlag() && !record.getReferenceName().equals(record.getMateReferenceName())){
+                            chimeric = Math.incrementExact(chimeric);
 
-            if(alignReads.umiRead.containsKey(umi)){
-                ReadFreq prev = alignReads.umiRead.get(umi);
-                prev.read = merge.merge(read, prev.read);
-                prev.freq++;
-            }else{
-                alignReads.umiRead.put(umi, new ReadFreq(read, 1));
-            }
+                            if(removeChimeric)
+                                continue;
+                        }
+                    }
 
-            if(idx >= alignReads.latest){
-                List<Read> deduped;
-                Data data = null;
+                    Alignment alignment = alignmentFor(record, paired);
 
-                try{
-                    data = dataClass.getDeclaredConstructor().newInstance();
-                }catch(Exception ex){
-                    ex.printStackTrace();
+                    if(!align.containsKey(alignment))
+                        align.put(alignment, new AlignReads());
+
+                    align.get(alignment).latest = readCount;
+                    readCount = Math.incrementExact(readCount);
                 }
-
-                if(algo instanceof Algorithm)
-                    deduped = ((Algorithm)algo).apply(alignReads.umiRead, (DataStructure)data, new ClusterTracker(trackClusters), umiLength, k, percentage);
-                else
-                    deduped = ((ParallelAlgorithm)algo).apply(alignReads.umiRead, (ParallelDataStructure)data, new ClusterTracker(trackClusters), umiLength, k, percentage);
-
-                avgUMICount += alignReads.umiRead.size();
-                maxUMICount = Math.max(maxUMICount, alignReads.umiRead.size());
-                dedupedCount += deduped.size();
-
-                for(Read r : deduped)
-                    writer.write(((SAMRead)r).toSAMRecord());
-
-                // done with the current alignment position, so free up memory
-                align.remove(alignment);
             }
 
-            idx++;
-        }
+            System.gc(); // attempt to clear up memory before second pass
 
-        try{
-            reader.close();
-        }catch(Exception e){
-            e.printStackTrace();
-        }
+            System.out.println("Done with the first pass!");
+            alignPosCount = align.size();
 
-        writer.close();
+            try(SamReader secondPass = SamReaderFactory.makeDefault()
+                        .validationStringency(ValidationStringency.SILENT)
+                        .open(in);
+                    SAMRecordIterator records = secondPass.iterator()){
+                long idx = 0L;
+
+                while(records.hasNext()){
+                    SAMRecord record = records.next();
+
+                    if(record.getReadUnmappedFlag()) // discard unmapped reads
+                        continue;
+
+                    if(paired && ((removeUnpaired && !record.getReadPairedFlag()) // discard unpaired
+                                || (record.getReadPairedFlag() && record.getSecondOfPairFlag()) // ignore reversed reads
+                                || (record.getReadPairedFlag() && record.getMateUnmappedFlag()) // discard unmapped reads
+                                || (removeChimeric && record.getReadPairedFlag()
+                                    && !record.getReferenceName().equals(record.getMateReferenceName())))){ // discard chimeric reads
+                        continue;
+                    }
+
+                    Alignment alignment = alignmentFor(record, paired);
+                    AlignReads alignReads = align.get(alignment);
+
+                    if(alignReads.umiRead == null)
+                        alignReads.umiRead = new HashMap<BitSet, ReadFreq>(4);
+
+                    Read read = new SAMRead(record);
+                    BitSet umi = getValidatedUMI(read, k);
+                    ReadFreq previous = alignReads.umiRead.get(umi);
+
+                    if(previous != null){
+                        previous.read = merge.merge(read, previous.read);
+                        previous.increment();
+                    }else{
+                        alignReads.umiRead.put(umi, new ReadFreq(read, 1));
+                    }
+
+                    if(idx >= alignReads.latest){
+                        Data data = instantiateData(dataClass);
+                        List<Read> deduped;
+
+                        if(algo instanceof Algorithm)
+                            deduped = ((Algorithm)algo).apply(alignReads.umiRead, (DataStructure)data, new ClusterTracker(trackClusters), umiLength, k, percentage);
+                        else
+                            deduped = ((ParallelAlgorithm)algo).apply(alignReads.umiRead, (ParallelDataStructure)data, new ClusterTracker(trackClusters), umiLength, k, percentage);
+
+                        avgUMICount = Math.addExact(avgUMICount, alignReads.umiRead.size());
+                        maxUMICount = Math.max(maxUMICount, alignReads.umiRead.size());
+                        dedupedCount = Math.addExact(dedupedCount, deduped.size());
+
+                        for(Read dedupedRead : deduped)
+                            writer.write(((SAMRead)dedupedRead).toSAMRecord());
+
+                        // done with the current alignment position, so free up memory
+                        align.remove(alignment);
+                    }
+
+                    idx = Math.incrementExact(idx);
+                }
+            }
+        }catch(IOException ex){
+            throw new IllegalStateException("Could not close SAM input resources for " + in, ex);
+        }
 
         System.out.println("Number of input reads\t" + totalReadCount);
         System.out.println("Number of removed unmapped reads\t" + unmapped);
@@ -774,7 +885,7 @@ public class DeduplicateSAM{
         System.out.println("Number of reads after deduplicating\t" + dedupedCount);
     }
 
-    private static class ReversedRead implements Comparable{
+    private static class ReversedRead implements Comparable<ReversedRead>{
         private String name, ref;
         private int coord;
 
@@ -800,7 +911,7 @@ public class DeduplicateSAM{
             if(!name.equals(a.name))
                 return false;
 
-            return true;
+            return coord == a.coord;
         }
 
         @Override
@@ -812,11 +923,9 @@ public class DeduplicateSAM{
         }
 
         @Override
-        public int compareTo(Object o){
-            ReversedRead other = (ReversedRead)o;
-
+        public int compareTo(ReversedRead other){
             if(coord != other.coord)
-                return coord - other.coord;
+                return Integer.compare(coord, other.coord);
 
             if(ref != other.ref)
                 return ref.compareTo(other.ref);
@@ -826,10 +935,11 @@ public class DeduplicateSAM{
     }
 
     // heavily inspired by TwoPassPairWriter from UMI-tools
-    private static class Writer{
+    private static class Writer implements AutoCloseable{
         private boolean paired;
         private SAMFileWriter writer;
         private SamReader reader;
+        private boolean indexed;
 
         private String ref = null;
         private HashSet<ReversedRead> set;
@@ -837,10 +947,12 @@ public class DeduplicateSAM{
         public Writer(File in, File out, SamReader r, boolean paired, boolean streaming){
             SamReader pairedReader = null;
             SAMFileWriter outputWriter = null;
+            boolean pairedReaderIndexed = false;
 
             try{
                 if(paired){
                     pairedReader = SamReaderFactory.makeDefault().validationStringency(ValidationStringency.SILENT).open(in);
+                    pairedReaderIndexed = pairedReader.hasIndex();
                     this.set = new HashSet<ReversedRead>();
                 }
 
@@ -874,6 +986,7 @@ public class DeduplicateSAM{
             this.reader = pairedReader;
             this.writer = outputWriter;
             this.paired = paired;
+            this.indexed = pairedReaderIndexed;
         }
 
         public void write(SAMRecord record){
@@ -884,7 +997,9 @@ public class DeduplicateSAM{
                     ref = currRef;
 
                 if(!ref.equals(currRef)){
-                    writeReversed(false);
+                    if(indexed && !set.isEmpty())
+                        writeReversed(false);
+
                     ref = currRef;
                 }
 
@@ -900,12 +1015,21 @@ public class DeduplicateSAM{
             writer.addAlignment(record);
         }
 
+        @Override
         public void close(){
             Throwable failure = null;
 
             try{
-                if(paired)
-                    writeReversed(true);
+                if(paired && !set.isEmpty()){
+                    // Indexed inputs can normally resolve the final reference with
+                    // one bounded query. Only fall back to a sequential pass when
+                    // an input has no index or cross-reference mates remain.
+                    if(indexed)
+                        writeReversed(false);
+
+                    if(!set.isEmpty())
+                        writeReversed(true);
+                }
             }catch(RuntimeException | Error ex){
                 failure = ex;
             }
@@ -936,14 +1060,8 @@ public class DeduplicateSAM{
             if(ref == null)
                 return;
 
-            SAMRecordIterator iter = null;
-
-            if(fullPass)
-                iter = reader.iterator();
-            else
-                iter = reader.query(ref, 0, 0, true);
-
-            try{
+            try(SAMRecordIterator iter =
+                    fullPass ? reader.iterator() : reader.query(ref, 0, 0, true)){
                 while(iter.hasNext()){
                     SAMRecord record = iter.next();
 
@@ -957,14 +1075,10 @@ public class DeduplicateSAM{
                                 record.getAlignmentStart()
                         );
 
-                        if(set.contains(read)){
+                        if(set.remove(read))
                             writer.addAlignment(record);
-                            set.remove(read);
-                        }
                     }
                 }
-            }finally{
-                iter.close();
             }
         }
 
@@ -978,7 +1092,7 @@ public class DeduplicateSAM{
     }
 
     private static class AlignReads{
-        public int latest;
+        public long latest;
         public Map<BitSet, ReadFreq> umiRead;
 
         public AlignReads(){
@@ -990,16 +1104,37 @@ public class DeduplicateSAM{
     private static class StreamingAlignReads{
         public Alignment alignment;
         public int flushStart;
+        public BitSet firstUmi;
+        public Read firstRead;
+        public int firstFrequency;
         public Map<BitSet, ReadFreq> umiRead;
 
         public StreamingAlignReads(Alignment alignment, int flushStart){
             this.alignment = alignment;
             this.flushStart = flushStart;
-            this.umiRead = new HashMap<BitSet, ReadFreq>(4);
+            this.firstUmi = null;
+            this.firstRead = null;
+            this.firstFrequency = 0;
+            this.umiRead = null;
+        }
+
+        public int umiCount(){
+            return umiRead == null ? 1 : umiRead.size();
+        }
+
+        public Map<BitSet, ReadFreq> materialize(){
+            if(umiRead == null){
+                umiRead = new HashMap<BitSet, ReadFreq>(4);
+                umiRead.put(firstUmi, new ReadFreq(firstRead, firstFrequency));
+            }
+
+            return umiRead;
         }
     }
 
     private static class StreamingFallbackException extends IllegalStateException{
+        private static final long serialVersionUID = 1L;
+
         public StreamingFallbackException(String message){
             super(message);
         }
@@ -1015,7 +1150,7 @@ public class DeduplicateSAM{
 
         @Override
         public boolean equals(Object o){
-            if(!(o instanceof Alignment))
+            if(o == null || getClass() != o.getClass())
                 return false;
 
             PairedAlignment a = (PairedAlignment)o;
@@ -1037,7 +1172,10 @@ public class DeduplicateSAM{
         }
 
         @Override
-        public int compareTo(Object o){
+        public int compareTo(Alignment o){
+            if(!(o instanceof PairedAlignment))
+                return super.compareTo(o);
+
             PairedAlignment other = (PairedAlignment)o;
 
             if(tlen != other.tlen)
@@ -1047,7 +1185,7 @@ public class DeduplicateSAM{
         }
     }
 
-    private static class Alignment implements Comparable{
+    private static class Alignment implements Comparable<Alignment>{
         private boolean strand;
         private int coord;
         private String ref;
@@ -1064,7 +1202,7 @@ public class DeduplicateSAM{
 
         @Override
         public boolean equals(Object o){
-            if(!(o instanceof Alignment))
+            if(o == null || getClass() != o.getClass())
                 return false;
 
             Alignment a = (Alignment)o;
@@ -1093,16 +1231,19 @@ public class DeduplicateSAM{
         }
 
         @Override
-        public int compareTo(Object o){
-            Alignment other = (Alignment)o;
-
+        public int compareTo(Alignment other){
             if(strand != other.strand)
                 return Boolean.compare(strand, other.strand);
 
             if(coord != other.coord)
-                return coord - other.coord;
+                return Integer.compare(coord, other.coord);
 
-            return ref.compareTo(other.ref);
+            int refComparison = ref.compareTo(other.ref);
+
+            if(refComparison != 0)
+                return refComparison;
+
+            return getClass().getName().compareTo(other.getClass().getName());
         }
     }
 }
