@@ -19,12 +19,14 @@ while read -r filename expected_sha256 url extra; do
         exit 1
     fi
 
-    for existing in "${dependency_names[@]}"; do
-        if [[ $existing == "$filename" ]]; then
-            echo "error: duplicate dependency filename in dependencies.lock: $filename" >&2
-            exit 1
-        fi
-    done
+    if (( ${#dependency_names[@]} > 0 )); then
+        for existing in "${dependency_names[@]}"; do
+            if [[ $existing == "$filename" ]]; then
+                echo "error: duplicate dependency filename in dependencies.lock: $filename" >&2
+                exit 1
+            fi
+        done
+    fi
     dependency_names+=("$filename")
 done < "$LOCK_FILE"
 
