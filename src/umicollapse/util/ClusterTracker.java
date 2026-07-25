@@ -20,13 +20,14 @@ public class ClusterTracker{
     public ClusterTracker(boolean track){
         this.track = track;
         this.offset = 0;
-
-        this.temp = new ArrayList<BitSet>();
         this.tempFreq = 0;
-
-        this.toUniqueIdx = new HashMap<BitSet, Integer>();
-        this.clusters = new ArrayList<ClusterStats>();
         this.idx = 0;
+
+        if(track){
+            this.temp = new ArrayList<BitSet>();
+            this.toUniqueIdx = new HashMap<BitSet, Integer>();
+            this.clusters = new ArrayList<ClusterStats>();
+        }
     }
 
     public boolean shouldTrack(){
@@ -37,6 +38,16 @@ public class ClusterTracker{
         this.offset = offset;
     }
 
+    public void setOffset(long offset){
+        if(offset < Integer.MIN_VALUE || offset > Integer.MAX_VALUE){
+            throw new ArithmeticException(
+                    "Cluster ID offset exceeds the supported signed-integer range: " + offset
+            );
+        }
+
+        this.offset = (int)offset;
+    }
+
     public int getOffset(){
         return this.offset;
     }
@@ -45,8 +56,16 @@ public class ClusterTracker{
         if(this.track){
             this.temp.addAll(s);
 
-            for(BitSet umi : s)
-                this.tempFreq += reads.get(umi).freq;
+            for(BitSet umi : s){
+                try{
+                    this.tempFreq = Math.addExact(this.tempFreq, reads.get(umi).freq);
+                }catch(ArithmeticException ex){
+                    throw new ArithmeticException(
+                            "Cluster frequency exceeds the supported maximum of "
+                            + Integer.MAX_VALUE
+                    );
+                }
+            }
         }
     }
 
@@ -59,16 +78,29 @@ public class ClusterTracker{
 
             this.temp.clear();
             this.tempFreq = 0;
-            this.idx++;
+            try{
+                this.idx = Math.incrementExact(this.idx);
+            }catch(ArithmeticException ex){
+                throw new ArithmeticException(
+                        "Cluster count exceeds the supported maximum of " + Integer.MAX_VALUE
+                );
+            }
         }
     }
 
     public int getId(BitSet umi){
+        requireTracking();
         return toUniqueIdx.get(umi);
     }
 
     public ClusterStats getStats(int id){
+        requireTracking();
         return clusters.get(id);
+    }
+
+    private void requireTracking(){
+        if(!track)
+            throw new IllegalStateException("Cluster tracking is disabled");
     }
 
     public static class ClusterStats{

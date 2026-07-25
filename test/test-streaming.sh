@@ -154,6 +154,74 @@ assert_fails_without_replacing 'positive-lag window is too small' "$TMP_DIR/lag-
 [[ $(inspect sort-order "$TMP_DIR/two-pass.sam") == coordinate ]] \
     || fail "two-pass path did not preserve coordinate sort order"
 
+route_fixture=$FIXTURES/nonstreaming-routes.sam
+route_common=(
+    sam -i "$route_fixture" -u 4 -k 1 --algo dir --data bktree
+    --merge mapqual --streaming-mode off
+)
+
+"$ROOT_DIR/umicollapse" "${route_common[@]}" \
+    -o "$TMP_DIR/route-legacy.sam" > /dev/null
+"$ROOT_DIR/umicollapse" "${route_common[@]}" \
+    -o "$TMP_DIR/route-two-pass.sam" --two-pass > /dev/null
+"$ROOT_DIR/umicollapse" "${route_common[@]}" \
+    -o "$TMP_DIR/route-parallel-groups.sam" -t 2 > /dev/null
+"$ROOT_DIR/umicollapse" "${route_common[@]}" \
+    -o "$TMP_DIR/route-parallel-cluster.sam" -T 2 > /dev/null
+
+for route in two-pass parallel-groups parallel-cluster; do
+    assert_records_equal \
+        "$TMP_DIR/route-legacy.sam" \
+        "$TMP_DIR/route-$route.sam" \
+        "non-streaming route $route changed the semantic record multiset"
+done
+
+[[ $(inspect count "$TMP_DIR/route-legacy.sam") == 4 ]] \
+    || fail "tie-free route fixture did not collapse to four representatives"
+inspect names "$TMP_DIR/route-legacy.sam" > "$TMP_DIR/route.names"
+diff -u - "$TMP_DIR/route.names" <<'EOF' \
+    || fail "tie-free route fixture selected unexpected representatives"
+routeA1_AAAA
+routeC1_CCCC
+routeD1_GGGG
+routeF1_TTTT
+EOF
+
+tag_fixture=$FIXTURES/tag-contract.sam
+"$ROOT_DIR/umicollapse" sam -i "$tag_fixture" -o "$TMP_DIR/tagged.sam" \
+    -u 4 -k 1 --algo dir --data bktree --merge mapqual \
+    --streaming-mode off --tag > /dev/null
+
+awk -F '\t' '
+    BEGIN { OFS = "\t" }
+    !/^@/ {
+        mi = rx = cs = su = extra = "-"
+        for(i = 12; i <= NF; i++){
+            if($i ~ /^MI:/) mi = $i
+            else if($i ~ /^RX:/) rx = $i
+            else if($i ~ /^cs:/) cs = $i
+            else if($i ~ /^su:/) su = $i
+            else if(extra == "-") extra = $i
+            else extra = extra "," $i
+        }
+        print $1, $2, mi, rx, cs, su, extra
+    }
+' "$TMP_DIR/tagged.sam" | LC_ALL=C sort > "$TMP_DIR/tagged.contract"
+
+diff -u - "$TMP_DIR/tagged.contract" <<'EOF' \
+    || fail "SAM tag mode violated its MI/RX/duplicate/cluster-attribute contract"
+tagA1_AAAA	0	MI:Z:0	RX:Z:AAAA	cs:i:7	su:i:5	-
+tagA2_AAAA	1024	MI:Z:0	RX:Z:AAAA	-	-	-
+tagA3_AAAA	1024	MI:Z:0	RX:Z:AAAA	-	-	-
+tagA4_AAAA	1024	MI:Z:0	RX:Z:AAAA	-	-	-
+tagA5_AAAA	1024	MI:Z:0	RX:Z:AAAA	-	-	-
+tagB1_AAAT	1024	MI:Z:0	RX:Z:AAAA	-	su:i:2	-
+tagB2_AAAT	1024	MI:Z:0	RX:Z:AAAA	-	-	-
+tagC1_CCCC	0	MI:Z:1	RX:Z:CCCC	cs:i:3	su:i:3	-
+tagC2_CCCC	1024	MI:Z:1	RX:Z:CCCC	-	-	-
+tagC3_CCCC	1024	MI:Z:1	RX:Z:CCCC	-	-	-
+EOF
+
 assert_fails_without_replacing '--streaming-mode on cannot be combined with --two-pass' "$TMP_DIR/incompatible.sam" \
     "$ROOT_DIR/umicollapse" sam -i "$core" -o "$TMP_DIR/incompatible.sam" --streaming-mode on --two-pass
 assert_fails_without_replacing '--streaming-mode is only supported in sam or bam mode' "$TMP_DIR/incompatible.fastq" \

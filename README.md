@@ -1,180 +1,346 @@
 # dUMI
 
-dUMI is the Plasmidsaurus DGE performance fork of UMICollapse. It retains the
-UMICollapse command-line interface while adding optimized UMI data structures
-and a guarded, bounded-memory fast path for coordinate-sorted single-end
-SAM/BAM input. The fork is based on upstream UMICollapse v1.1.0 (`aeacd82`).
+[![CI](https://github.com/justinblethrow-cloud/dUMI/actions/workflows/ci.yml/badge.svg)](https://github.com/justinblethrow-cloud/dUMI/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-See [MIGRATION.md](MIGRATION.md) for repository provenance and
-[VALIDATION.md](VALIDATION.md) for the current acceptance record.
+dUMI is an independently maintained fork of
+[UMICollapse](https://github.com/Daniel-Liu-c0deb0t/UMICollapse), a Java tool
+for deduplicating reads with Unique Molecular Identifiers (UMIs). It retains
+the UMICollapse command-line model and clustering choices while adding:
 
-## About UMICollapse
+- guarded streaming for compatible coordinate-sorted, single-end SAM/BAM
+  inputs;
+- optimized UMI parsing, representation, neighbor search, and clustering
+  paths;
+- deterministic quality-based representative selection;
+- transactional output handling, stricter input validation, and broader
+  regression coverage;
+- checksum-locked dependencies and reproducible Java 11-targeted builds.
 
-UMICollapse accelerates the deduplication and collapsing process for reads with Unique Molecular Identifiers (UMI).
+The installed executable remains named `umicollapse` for command-line
+compatibility.
 
-UMIs are a popular way to identify duplicate DNA/RNA reads caused by PCR amplification. This requires software for collapsing duplicate reads with the same UMI, while accounting for sequencing/PCR errors. This tool implements many efficient algorithms for orders-of-magnitude faster UMI deduplication than previous tools (UMI-tools, etc.), while maintaining similar functionality. This is achieved by using faster data structures with n-grams and BK-trees, along other techniques that are carefully implemented to scale well to larger datasets and longer UMIs. Users of UMICollapse have reported speedups from taking *hours or days* to run with a previous tool to taking only a few *minutes* with this tool with real datasets!
+dUMI is based on canonical UMICollapse commit
+[`efeab35`](https://github.com/Daniel-Liu-c0deb0t/UMICollapse/commit/efeab35f5d29dec1d496ade3f681eeb34d9c2057)
+and directly incorporates commit
+[`aeacd82`](https://github.com/Daniel-Liu-c0deb0t/UMICollapse/pull/32/commits/aeacd8231cf8e77c03d03139ed6e65a4c2845015)
+from upstream [PR #32](https://github.com/Daniel-Liu-c0deb0t/UMICollapse/pull/32).
+The latter is incorporated proposal history, not a canonical upstream
+`v1.1.0` release. See [Project provenance](PROVENANCE.md) for the complete
+lineage and the consolidated upstream submission.
 
-The preprint paper is available **[here](https://www.biorxiv.org/content/10.1101/648683v2)** and it has been published in PeerJ. If you use this code, please cite
+## How deduplication works
 
-```
-@article{liu2019algorithms,
-  title={Algorithms for efficiently collapsing reads with Unique Molecular Identifiers},
-  author={Liu, Daniel},
-  journal={bioRxiv},
-  year={2019},
-  publisher={Cold Spring Harbor Laboratory}
-}
-```
+For single-end SAM/BAM input, dUMI:
+
+1. groups mapped reads by reference, strand, and unclipped alignment
+   coordinate;
+2. merges reads with the same UMI at that coordinate;
+3. clusters nearby UMIs with the selected directional, adjacency, or connected
+   components algorithm; and
+4. writes one selected input read for each retained cluster, unless `--tag` is
+   requested.
+
+The result is a **representative read**, selected by the configured merge
+policy. dUMI does not construct a new base-level consensus sequence.
+Paired mode extends the alignment key with template information and recovers
+the retained representative's reverse mate.
+
+FASTQ mode instead groups reads by length and treats the entire read sequence
+as the UMI-like clustering key.
 
 ## Installation
 
-Clone the maintained dUMI fork:
+### Versioned release
 
+For a published version, the preferred installation is the self-contained
+archive from [GitHub Releases](https://github.com/justinblethrow-cloud/dUMI/releases).
+Download `dumi-VERSION.tar.gz` and `SHA256SUMS`, verify the archive checksum,
+and then run:
+
+```bash
+grep ' dumi-VERSION.tar.gz$' SHA256SUMS | sha256sum --check -
+tar -xzf dumi-VERSION.tar.gz
+cd dumi-VERSION
+./umicollapse --version
 ```
+
+The release archive contains the launcher, production JAR, locked runtime
+dependencies, [third-party notices](THIRD_PARTY_NOTICES.md), license material,
+software bill of materials, and build receipt. It requires Bash and a Java 11
+or newer runtime. On macOS, replace `sha256sum --check` with
+`shasum -a 256 --check`.
+
+If no versioned dUMI release is listed yet, build from source.
+
+### Build from source
+
+Source builds require a JDK 11 or newer, Bash, `curl`, and either `sha256sum`
+(Linux) or `shasum` (macOS):
+
+```bash
 git clone https://github.com/justinblethrow-cloud/dUMI.git
 cd dUMI
-```
-
-Install a JDK 11 or newer, plus `curl`, `unzip`, and either `sha256sum` (Linux)
-or `shasum` (macOS). The build fetches the two runtime dependencies at their
-checksum-locked versions. To fetch or verify them independently, run:
-
-```
-./scripts/bootstrap-dependencies.sh
-```
-
-Dependency URLs and SHA-256 digests are recorded in `dependencies.lock`.
-
-Bioconda (`conda install -c bioconda umicollapse`) and the nf-core
-[`umicollapse` module](https://nf-co.re/modules/umicollapse) install upstream
-UMICollapse, not this dUMI fork.
-
-## Example Run
-First, get some sample data from the UMI-tools repository. These aligned reads have their UMIs extracted and concatenated to the end of their read headers (you can do this with the `extract` tool in UMI-tools, using "`_`" as the UMI separator). Make sure you have `samtools` installed to index the BAM file.
-```
-mkdir -p test/example
-cd test/example
-curl -O -L https://github.com/CGATOxford/UMI-tools/releases/download/1.0.0/example.bam
-samtools index example.bam
-cd ../..
-```
-Finally, `test/example/example.bam` can be deduplicated.
-```
-./umicollapse bam -i test/example/example.bam -o test/example/dedup_example.bam
-```
-The UMI length will be autodetected, and the output `test/example/dedup_example.bam` should only contain reads that have a unique UMI. Unmapped reads are removed. One goal of UMICollapse is to offer similar deduplication results as UMI-tools, so it can be easily integrated into existing workflows.
-
-Here is a hypothetical example with paired-end reads:
-```
-./umicollapse bam -i paired_example.bam -o dedup_paired_example.bam --umi-sep : --paired --two-pass
-```
-This should be equivalent to the following with [UMI-tools](https://github.com/CGATOxford/UMI-tools):
-```
-umi_tools dedup -I paired_example.bam -S dedup_paired_example.bam --umi-separator=: --paired
-```
-
-By default, clusters/groups of reads with the same UMI are collapsed into one consensus read. It is possible to only mark duplicate reads with the `--tag` option. A sample output SAM/BAM record would look like
-```
-SRR2057595.13407254_ACCGGTTTA   16      chr1    3812795 255     50M     *       0       0       *       *       XA:i:2  MD:Z:41T2T5     MI:Z:3389       NM:i:2  RX:Z:ACCGGTTTA  cs:i:74 su:i:74
-```
-The above record is the consensus read of a group with ID `3389`. The cluster/group size (`cs` in BAM/SAM mode or `cluster_size` in FASTQ mode) is `74`, and all of the UMIs in the group are the same because the attribute `su = 74` (or `same_umi` in FASTQ mode) indicates the number of reads with the exact same UMI. Note that only the consensus read of each cluster would have the cluster size tag, so typically reads that are not consensus reads would only have the cluster ID as their only tag. Reads that are not the consensus read will also be marked with the duplicate flag in the SAM/BAM record. Note that only the forwards reads are tagged in paired-end mode. This also currently does not work with `--two-pass`. In `fastq` mode, tags are appended to the header of each read.
-
-The examples above are based on the workflow where reads are aligned to produce SAM/BAM files before collapsing them based on their UMIs at each unique alignment coordinate. It is also possible to collapse reads based on their sequences directly, without aligning. This may be preferable or faster in some workflows. This can be done by specifying the `fastq` option instead of `bam` and providing an input FASTQ file:
-```
-./umicollapse fastq -i input.fastq -o output.fastq
-```
-
-It is important to note that UMIs are first collapsed by identity (exact same UMIs), and then grouped/clustered using the directional/adjacency/connected components algorithms that allow for some errors/mismatches.
-
-## Building
-
-Build Java 11-compatible bytecode and the production JAR with:
-
-```
 ./build.sh
+./umicollapse --version
 ```
 
-The build starts from a clean `build/` directory, compiles test classes
-separately, packages production classes only, and embeds a source-tree hash in
-`umicollapse.jar`.
+`build.sh` downloads only the artifacts named in
+[`dependencies.lock`](dependencies.lock), verifies their SHA-256 digests, and
+compiles Java 11-compatible bytecode.
 
-## Testing
+As of 2026-07-25, Bioconda's `umicollapse` package and the nf-core
+[`umicollapse` module](https://nf-co.re/modules/umicollapse) resolve to the
+existing `1.1.0` package built from the intermediate
+`siddharthab/UMICollapse` fork, not dUMI. See
+[Project provenance](PROVENANCE.md) for why that distinction matters.
 
-Run the full local verification gate with:
+## Quick start
 
+SAM/BAM mode expects the UMI in each read name. With the default separator, a
+read name can end in an underscore followed by bases such as
+`read-0001_ACGTACGT`.
+
+For a coordinate-sorted, single-end BAM:
+
+```bash
+./umicollapse bam \
+  -i input.coordinate.bam \
+  -o deduplicated.unsorted.bam
 ```
+
+The default `--streaming-mode auto` uses the guarded streaming route when the
+input and option combination are eligible. Streaming output is deliberately
+marked `SO:unsorted`, because completed coordinate groups may be emitted in a
+different order. Sort it before indexing or passing it to a consumer that
+requires coordinate order:
+
+```bash
+samtools sort -o deduplicated.coordinate.bam deduplicated.unsorted.bam
+samtools index deduplicated.coordinate.bam
+```
+
+`samtools` is needed only for this downstream sort/index example, not to run
+dUMI itself.
+
+To deduplicate FASTQ reads by their full sequence:
+
+```bash
+./umicollapse fastq -i input.fastq -o deduplicated.fastq
+```
+
+Run `./umicollapse --help` for the built-in synopsis.
+
+## Input and output contracts
+
+### SAM/BAM UMIs
+
+- UMIs are read from the read name, not from tags such as `RX`.
+- `--umi-sep` is a literal string; regular-expression characters have no
+  special meaning.
+- `-u -1` sets the effective UMI length from the first eligible read.
+  Subsequent shorter UMIs are rejected and longer UMIs are truncated to that
+  length. A positive `-u` establishes the same contract explicitly.
+- `-k` must satisfy `0 <= k < effective UMI length`; with autodetection, that
+  relationship can be checked only after the first eligible read is parsed.
+- The UMI alphabet accepted by the read-name parser is `A`, `T`, `C`, `G`, and
+  `N`, case-insensitively.
+- Unmapped reads are removed by default. `--keep-unmapped` retains them in
+  single-end SAM/BAM mode.
+
+Both `sam` and `bam` select the aligned-read pipeline. HTSJDK detects the input
+format; an output name ending in `.sam` produces text SAM, while other aligned
+output names produce BAM.
+
+### Representative selection
+
+The default merge policy is `mapqual` for SAM/BAM and `avgqual` for FASTQ.
+Mapping-quality and average-quality ties use stable record-content ordering.
+The `any` policy intentionally keeps an arbitrary encounter-order
+representative. Stable quality ties and stable equal-frequency UMI ordering
+are deliberate dUMI refinements: when multiple choices are equally valid
+under the configured rules, dUMI can select a different representative or
+cluster seed than upstream's encounter- or hash-order-dependent choice.
+
+With `--tag`, reads are retained and annotated with cluster information instead
+of removing duplicate records. In SAM/BAM output, duplicate records are also
+marked with the SAM duplicate flag. Tagging uses a non-streaming path.
+
+### Transactional output
+
+Every command writes to a temporary file beside the requested destination and
+promotes it only after successful processing. Invalid invocations are rejected
+before processing, input and output cannot identify the same file, and a
+processing failure does not replace an existing destination.
+
+## Streaming behavior
+
+Streaming is eligible when all of the following are true:
+
+- the mode is `sam` or `bam`;
+- the input header declares `SO:coordinate`;
+- processing is single-end and sequential;
+- `--tag` and `--two-pass` are not enabled.
+
+`--streaming-mode` controls the route:
+
+| Value | Behavior |
+| --- | --- |
+| `auto` | Default. Use streaming when eligible; if actual coordinate order or the clipping-window contract is violated, discard the attempt and retry through the legacy path. |
+| `on` | Require streaming. An incompatible configuration or runtime contract violation fails without promoting incomplete output. |
+| `off` | Always use the compatible legacy path. |
+
+Positive-strand unclipped starts can precede coordinate-sort positions because
+of leading clipping. The streaming route therefore retains groups behind a
+10,000-base default window and validates each read before releasing a group.
+This produces a **coordinate-window-bounded working set**, not a constant-memory
+guarantee. Density, unique UMIs per coordinate, read payloads, and JVM behavior
+still affect peak memory.
+
+The clipping allowance can be raised with a JVM system property:
+
+```bash
+UMICOLLAPSE_JAVA_OPTS='-Dumicollapse.streaming.positiveLag=20000' \
+  ./umicollapse bam -i input.bam -o output.bam
+```
+
+`UMICOLLAPSE_JAVA_OPTS` is split on whitespace by the launcher; shell quoting
+embedded inside its value is not parsed a second time. The launcher otherwise
+uses the JVM's heap defaults. For incompatible or unusually dense workloads,
+use `--streaming-mode off`, consider `--two-pass`, or set an explicit heap
+limit appropriate for the input.
+
+## Command-line reference
+
+Usage:
+
+```text
+umicollapse <fastq|sam|bam> -i INPUT -o OUTPUT [options]
+umicollapse --help
+umicollapse --version
+```
+
+### Core options
+
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `-i PATH` | Input file; required. | — |
+| `-o PATH` | Output file; required and different from the input. | — |
+| `-k N` | Maximum substitution edits used to find neighboring UMIs. | `1` |
+| `-u N` | UMI length; `-1` autodetects in SAM/BAM. In FASTQ, a positive value trims that prefix from emitted sequence and quality without changing the full-sequence clustering key. | `-1` |
+| `-p FRACTION` | Non-negative directional-algorithm frequency threshold. | `0.5` |
+| `--algo NAME` | `dir`, `adj`, or `cc`. | `dir` |
+| `--data NAME` | Neighbor-search data structure; see below. | `ngrambktree` |
+| `--merge NAME` | `mapqual`, `avgqual`, or `any`. `mapqual` is not available in FASTQ mode. | `mapqual` for SAM/BAM; `avgqual` for FASTQ |
+| `-t N` | Parallelize separate alignment or read-length groups with `N` threads. | sequential |
+| `-T N` | Parallelize clustering within a group with `N` threads. | sequential |
+| `--tag` | Retain and annotate cluster members rather than removing duplicates. | off |
+
+Sequential `--data` choices are `naive`, `combo`, `ngram`, `delete`, `trie`,
+`bktree`, `sortbktree`, `ngrambktree`, `sortngrambktree`, and
+`fenwickbktree`. With `-T`, the supported choices are `naive`, `bktree`, and
+`fenwickbktree`; if `--data` is omitted, `-T` defaults to `bktree`.
+
+### SAM/BAM options
+
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `--umi-sep STRING` | Literal separator immediately before the read-name UMI. | `_` |
+| `--two-pass` | Use the alternative sequential two-pass path. | off |
+| `--paired` | Deduplicate paired alignments using the forward read and template length, then recover retained reverse mates. | off |
+| `--remove-unpaired` | Remove unpaired reads; requires `--paired`. | off |
+| `--remove-chimeric` | Remove pairs mapped to different references; requires `--paired`. | off |
+| `--keep-unmapped` | Retain unmapped single-end reads. | off |
+| `--streaming-mode MODE` | `auto`, `on`, or `off`, as described above. | `auto` |
+
+The CLI rejects unsupported combinations before opening an output writer.
+Notably, `-t` and `-T` are mutually exclusive; paired mode cannot use `-t` or
+`--keep-unmapped`; `--tag` cannot use a parallel mode or `--two-pass`; and
+forced streaming cannot use paired, parallel, tagging, or two-pass routes.
+
+## Build, test, and validation
+
+The runtime dependency set is intentionally small:
+
+- HTSJDK 3.0.5;
+- snappy-java 1.1.10.8.
+
+Exact download locations and SHA-256 digests are in
+[`dependencies.lock`](dependencies.lock).
+
+Run the complete local acceptance gate with:
+
+```bash
 ./scripts/check.sh
 ```
 
-This rebuilds the JAR, verifies its embedded source hash and Java 11 bytecode
-target, runs assertion-based unit and randomized data-structure tests, and runs
-the SAM/BAM streaming equivalence and failure-safety matrix. `./test.sh` runs
-the tests without rebuilding. CI runs the same gate on Linux with Java 11 and
-Java 21, plus macOS with Java 11.
+The gate performs a clean strict build, verifies the packaged artifact and
+Java 11 bytecode target, and runs unit, differential, CLI, SAM/BAM, streaming,
+failure-safety, and paired-reader regressions. CI runs the gate on Linux with
+Java 11 and Java 21 and on macOS with Java 11.
 
-The optimized `NgramBKTree`, UMI parsing, and clustering paths require no new
-runtime dependencies. For coordinate-sorted, single-end SAM/BAM inputs, dUMI's
-default guarded streaming mode bounds retained alignment groups to a coordinate
-window and safely retries the legacy path when its contract is not met.
+Check byte-for-byte build reproducibility separately with:
 
-For a deterministic synthetic-input streaming smoke benchmark (GNU `time` or
-Homebrew `gtime` required), run:
-
-```
-./scripts/benchmark-streaming.sh 100000
+```bash
+./scripts/check-reproducible-build.sh
 ```
 
-The harness compares explicit streaming `on` and `off` modes and requires
-identical record hashes. It is a regression signal, not a production-scale
-performance claim.
+Measured comparisons with canonical upstream, including exact commits,
+workloads, repetition counts, runtime settings, output-equivalence checks, and
+limitations, are recorded in [Performance](docs/PERFORMANCE.md). The small
+[`benchmark-streaming.sh`](scripts/benchmark-streaming.sh) harness is a local
+on/off regression signal, not a production-wide performance claim.
 
-There are also small scripts for testing and debugging. For example, comparing two files to check if the UMIs are the same can be done with:
-```
-./run.sh test.CompareDedupUMI test/dedup_example_1.bam test/dedup_example_2.bam
-```
-or running benchmarks:
-```
-./run.sh test.BenchmarkTime 10000 10 1 ngrambktree
-```
+## Documentation
 
-## Command-Line Arguments
-### Mode (appears before commands)
-* `sam` or `bam`: the input is an aligned SAM/BAM file with the UMIs in the read headers. This separately deduplicates each alignment coordinate. Unmapped reads are removed.
-* `fastq`: the input is a FASTQ file. This deduplicates the entire FASTQ file based on each entire read sequence. In other words, the entire read sequence is treated as the "UMI".
+| Document | Purpose |
+| --- | --- |
+| [Architecture](docs/ARCHITECTURE.md) | Canonical upstream and resulting dUMI architectures, including streaming invariants. |
+| [Optimization traceability](docs/OPTIMIZATIONS.md) | Opportunity, implementation, semantic contract, validation, and evidence for each change. |
+| [Performance](docs/PERFORMANCE.md) | Reproducible benchmark methodology and workload-scoped results. |
+| [Validation](VALIDATION.md) | Current correctness, compatibility, build, and dependency acceptance record. |
+| [Limitations](docs/LIMITATIONS.md) | Eligibility, memory, ordering, input, and platform boundaries. |
+| [Project provenance](PROVENANCE.md) | Canonical baseline, incorporated proposals, fork lineage, attribution, and license. |
+| [Allocation profiling](scripts/profile/README.md) | Reproducible, path-neutral JFR sampling and aggregation for the sparse streaming path. |
+| [Changelog](CHANGELOG.md) | User-visible changes by release. |
+| [Presentation reference](docs/presentation-reference/STORYBOARD.md) | Neutral source material, figure specifications, and claims ledger for a short technical presentation. |
 
-### Commands
-* `-i`: input file. Required.
-* `-o`: output file. Required.
-* `-k`: number of substitution edits to allow. Default: 1.
-* `-u`: the UMI length. If set to a length in `fastq` mode, then trims the prefix of each read (note: does not affect the sequence used for deduplicating). Default: autodetect.
-* `-p`: threshold percentage for identifying adjacent UMIs in the directional algorithm. Default: 0.5.
-* `-t`: parallelize the deduplication of each separate alignment position. Using this is discouraged as it is lacking many features. Default: false.
-* `-T`: parallelize the deduplication of one single alignment position. The data structure can only be `naive`, `bktree`, and `fenwickbktree`. Using this is discouraged as it is lacking many features. Default: false.
-* `--umi-sep`: separator string between the UMI and the rest of the read header. Default: `_`.
-* `--algo`: deduplication algorithm. Either `cc` for connected components, `adj` for adjacency, or `dir` for directional. Default: `dir`.
-* `--merge`: method for identifying which UMI to keep out of every two UMIs. Either `any`, `avgqual`, or `mapqual`. Default: `mapqual` for SAM/BAM mode, `avgqual` for FASTQ mode.
-* `--data`: data structure used in deduplication. Either `naive`, `combo`, `ngram`, `delete`, `trie`, `bktree`, `sortbktree`, `ngrambktree`, `sortngrambktree`, or `fenwickbktree`. Default: `ngrambktree`.
-* `--two-pass`: use a separate two-pass algorithm for SAM/BAM deduplication. This may be slightly slower, but it should use much less memory if the reads are approximately sorted by alignment coordinate. Default: false.
-* `--paired`: use paired-end mode, which deduplicates pairs of reads from a SAM/BAM file. The template length of each read pair, along with the alignment coordinate and UMI of the forwards read, are used to deduplicate read pairs. This is very memory intensive, and the input SAM/BAM files should be sorted. Default: false (single-end).
-* `--remove-unpaired`: remove unpaired reads during paired-end mode. Default: false.
-* `--remove-chimeric`: remove chimeric reads (pairs map to different references) during paired-end mode. Default: false.
-* `--keep-unmapped`: keep unmapped reads (no paired-end mode). Default: false.
-* `--tag`: tag reads that belong to the same group without removing them. In `fastq` mode, this will append `cluster_id=[unique ID for all reads of the same cluster]` to the header of every read. `cluster_size=[number of reads in the cluster]` will only be appended to the header of a consensus read for an entire group/cluster. `same_umi=[number of reads with the same UMI]` will be appended to the header of the "best" read of a group of reads with the exact same UMI (not allowing mismatches). In `sam`/`bam` mode, then all reads but the consensus reads will be marked with the duplicate flag. The `MI` attribute will be set with the `cluster_id` and the `RX` attribute will be set with the UMI of the consensus read. If applicable, the `cs` attribute is set with the `cluster_size`, and the `su` attribute is set with the `same_umi` count. For paired-end reads, only the forwards reads are tagged. This does not work with the `--two-pass` feature.
-* `--streaming-mode`: coordinate-sorted single-end SAM/BAM fast path. `auto` (default) uses streaming when compatible and safely retries the legacy path if coordinate order or the configured clipping window makes streaming unsafe. `on` requires streaming and fails without replacing the requested output when its contract is violated. `off` always uses the legacy path. Streaming is incompatible with paired, parallel, tagging, two-pass, and FASTQ modes. Streaming output is declared `SO:unsorted` because groups can be emitted outside coordinate order.
+## Known limitations
 
-## Java Virtual Machine Memory
+- The streaming route does not cover FASTQ, paired, tagging, two-pass, or
+  parallel modes. Those modes use compatible non-streaming paths.
+- Streaming output is unsorted and must be sorted before coordinate indexing.
+- UMIs must be present in read names; SAM UMI tags are not currently an input
+  source.
+- CRAM, SRA access, and other optional HTSJDK surfaces are outside the tested
+  and supported dUMI interface.
+- dUMI selects existing representative reads rather than constructing
+  consensus sequences.
+- Performance is workload- and environment-dependent. Synthetic results do not
+  imply a universal production gain.
 
-The launcher uses the JVM's heap defaults instead of reserving 12 GB at startup,
-while retaining a 20 MB stack for deeply recursive clusters. Set
-`UMICOLLAPSE_JAVA_OPTS` when a workload needs explicit tuning, for example:
+See [Limitations and compatibility boundaries](docs/LIMITATIONS.md) for
+details.
 
-```
-UMICOLLAPSE_JAVA_OPTS='-Xms12G -Xmx15G -Xss20M' ./umicollapse bam ...
-```
+## Citation
 
-For compatible coordinate-sorted single-end inputs, the default streaming fast
-path bounds retained alignment groups to a coordinate window. Use `--two-pass`
-or tune the heap for incompatible workloads.
+If you use dUMI, cite the software metadata in [`CITATION.cff`](CITATION.cff)
+and the original UMICollapse publication:
 
-## Issues
-Please open an issue if you have any questions/bugs/suggestions!
+> Daniel Liu. “Algorithms for efficiently collapsing reads with Unique
+> Molecular Identifiers.” *PeerJ* 7:e8275 (2019).
+> <https://doi.org/10.7717/peerj.8275>
+
+## Contributing, support, and security
+
+Bug reports and feature requests are welcome through
+[GitHub Issues](https://github.com/justinblethrow-cloud/dUMI/issues). Before
+submitting a change, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+Do not disclose vulnerability details or sensitive sequencing data in a public
+issue. Follow [`SECURITY.md`](SECURITY.md) for private reporting guidance.
+
+## License
+
+dUMI remains available under the upstream [MIT License](LICENSE). Retained
+upstream copyright and permission terms apply.

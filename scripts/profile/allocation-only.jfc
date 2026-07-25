@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Equivalent to a jfr configuration created from no base configuration,
+     with ObjectAllocationSample enabled at 1000/s and stack traces enabled. -->
+<configuration label="dUMI allocation samples" version="2.0">
+  <event name="jdk.ObjectAllocationSample">
+    <setting name="enabled">true</setting>
+    <setting name="throttle">1000/s</setting>
+    <setting name="stackTrace">true</setting>
+  </event>
+</configuration>

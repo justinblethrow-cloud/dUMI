@@ -4,6 +4,8 @@ import java.util.Set;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 import umicollapse.util.BitSet;
 import umicollapse.util.Read;
@@ -20,6 +22,15 @@ public class NgramBKTree implements DataStructure{
 
     @Override
     public void init(Map<BitSet, Integer> umiFreq, int umiLength, int maxEdits){
+        if(umiLength <= 0)
+            throw new IllegalArgumentException("UMI length must be positive");
+
+        if(maxEdits < 0 || maxEdits >= umiLength)
+            throw new IllegalArgumentException(
+                "Maximum edits must satisfy 0 <= maxEdits < UMI length ("
+                + umiLength + "): " + maxEdits
+            );
+
         this.umiFreq = umiFreq;
         this.umiLength = umiLength;
         this.maxEdits = maxEdits;
@@ -29,7 +40,12 @@ public class NgramBKTree implements DataStructure{
 
         if(useLongIntervalKeys){
             m = null;
-            longMap = new LongNodeMap(expectedNgramEntries(umiFreq.size(), maxEdits));
+            longMap = new LongNodeMap(expectedPackedNgramEntries(
+                umiFreq.size(),
+                umiLength,
+                ngramSize,
+                maxEdits
+            ));
         }else{
             longMap = null;
             m = new HashMap<Interval, Node>(expectedNgramMapCapacity(umiFreq.size(), maxEdits));
@@ -39,9 +55,15 @@ public class NgramBKTree implements DataStructure{
             insert(e.getKey(), e.getValue());
     }
 
-    // k <= maxEdits must be satisfied
+    // The pigeonhole lookup requires k <= the configured maximum edit count.
     @Override
     public Set<BitSet> removeNear(BitSet umi, int k, int maxFreq){
+        if(k < 0 || k > maxEdits)
+            throw new IllegalArgumentException(
+                "Requested edit distance must satisfy 0 <= k <= maxEdits ("
+                + maxEdits + "): " + k
+            );
+
         Set<BitSet> res = new HashSet<>();
         boolean queryRemoved = maxFreq == Integer.MAX_VALUE || !umiFreq.containsKey(umi);
 
@@ -52,11 +74,11 @@ public class NgramBKTree implements DataStructure{
 
             if(curr != null){
                 if(!queryRemoved){ // always remove the queried UMI
-                    recursiveRemoveNearBKTree(umi, curr, 0, Integer.MAX_VALUE, res);
+                    removeNearBKTreeIterative(umi, curr, 0, Integer.MAX_VALUE, res);
                     queryRemoved = !umiFreq.containsKey(umi);
                 }
 
-                recursiveRemoveNearBKTree(umi, curr, k, maxFreq, res);
+                removeNearBKTreeIterative(umi, curr, k, maxFreq, res);
             }
         }
 
@@ -92,7 +114,7 @@ public class NgramBKTree implements DataStructure{
     }
 
     private static int expectedNgramEntries(int umiCount, int maxEdits){
-        long expectedEntries = (long)umiCount * (maxEdits + 1);
+        long expectedEntries = (long)umiCount * ((long)maxEdits + 1L);
         return expectedEntries > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int)expectedEntries;
     }
 
@@ -106,12 +128,70 @@ public class NgramBKTree implements DataStructure{
         return capacity > (1 << 30) ? (1 << 30) : (int)capacity;
     }
 
+    private static int expectedPackedNgramEntries(
+        int umiCount,
+        int umiLength,
+        int ngramSize,
+        int maxEdits
+    ){
+        if(umiCount <= 0)
+            return 0;
+
+        /*
+         * A UMI contributes at most one key per interval, but an interval of
+         * length n has only five^n valid sequence keys.  The packed endpoint
+         * fields make different non-empty intervals disjoint.  Capping the
+         * estimate by that key universe avoids allocating for impossible
+         * entries when many UMIs share short n-grams.
+         *
+         * LongNodeMap still resizes normally, so this remains safe for callers
+         * that construct BitSets outside the five-base UMI input domain.
+         */
+        long regularUniverse = cappedSequenceUniverse(ngramSize, umiCount);
+        long regularEntries = saturatedMultiply(regularUniverse, maxEdits, Integer.MAX_VALUE);
+        long lastLength = (long)umiLength - (long)maxEdits * ngramSize;
+        long lastUniverse = cappedSequenceUniverse((int)lastLength, umiCount);
+
+        return (int)saturatedAdd(regularEntries, lastUniverse, Integer.MAX_VALUE);
+    }
+
+    private static long cappedSequenceUniverse(int length, int cap){
+        if(length < 0)
+            throw new IllegalArgumentException("N-gram interval length cannot be negative");
+
+        long universe = 1L;
+        int alphabetSize = Read.ALPHABET.length;
+
+        for(int i = 0; i < length; i++){
+            if(universe > cap / alphabetSize)
+                return cap;
+
+            universe *= alphabetSize;
+        }
+
+        return Math.min(universe, (long)cap);
+    }
+
+    private static long saturatedMultiply(long a, long b, long cap){
+        if(a == 0L || b == 0L)
+            return 0L;
+
+        return a > cap / b ? cap : a * b;
+    }
+
+    private static long saturatedAdd(long a, long b, long cap){
+        return a > cap - b ? cap : a + b;
+    }
+
     private static boolean canUseLongIntervalKeys(int umiLength, int ngramSize, int maxEdits){
-        if(umiLength > 255)
+        if(umiLength < 0 || umiLength > 255 || ngramSize < 0 || maxEdits < 0)
             return false;
 
-        int lastLength = umiLength - (maxEdits * ngramSize);
-        int maxIntervalLength = Math.max(ngramSize, lastLength);
+        long lastLength = (long)umiLength - (long)maxEdits * ngramSize;
+        if(lastLength < 0)
+            return false;
+
+        long maxIntervalLength = Math.max((long)ngramSize, lastLength);
         return maxIntervalLength <= 16;
     }
 
@@ -124,36 +204,73 @@ public class NgramBKTree implements DataStructure{
         return (((long)lo & 0xffL) << 56) | (((long)hi & 0xffL) << 48) | seq;
     }
 
-    private void recursiveRemoveNearBKTree(BitSet umi, Node curr, int k, int maxFreq, Set<BitSet> res){
-        int dist = umiDist(umi, curr.getUMI());
-        boolean exists = umiFreq.containsKey(curr.getUMI());
+    private void removeNearBKTreeIterative(
+            BitSet umi,
+            Node start,
+            int k,
+            int maxFreq,
+            Set<BitSet> res){
+        Deque<RemovalFrame> stack = new ArrayDeque<>();
+        stack.push(new RemovalFrame(start));
 
-        if(dist <= k && exists && curr.getFreq() <= maxFreq){
-            res.add(curr.getUMI());
-            umiFreq.remove(curr.getUMI());
-        }
+        while(!stack.isEmpty()){
+            RemovalFrame frame = stack.peek();
 
-        boolean subtreeExists = exists;
-        int minFreq = exists ? curr.getFreq() : Integer.MAX_VALUE;
+            if(!frame.entered){
+                int dist = umiDist(umi, frame.node.getUMI());
+                boolean exists = umiFreq.containsKey(frame.node.getUMI());
 
-        if(curr.hasNodes()){
-            int lo = Math.max(dist - k, 0);
-            int length = curr.getNodeCount();
-            int hi = Math.min(dist + k, length - 1);
-
-            for(int i = 0; i < length; i++){
-                if(curr.subtreeExists(i)){
-                    if(i >= lo && i <= hi && curr.minFreq(i) <= maxFreq)
-                        recursiveRemoveNearBKTree(umi, curr.get(i), k, maxFreq, res);
-
-                    minFreq = Math.min(minFreq, curr.minFreq(i));
-                    subtreeExists |= curr.subtreeExists(i);
+                if(dist <= k && exists && frame.node.getFreq() <= maxFreq){
+                    res.add(frame.node.getUMI());
+                    umiFreq.remove(frame.node.getUMI());
+                    exists = false;
                 }
+
+                frame.subtreeExists = exists;
+                frame.minFreq = exists
+                    ? frame.node.getFreq()
+                    : Integer.MAX_VALUE;
+                frame.lo = Math.max(dist - k, 0);
+                frame.childCount = frame.node.hasNodes()
+                    ? frame.node.getNodeCount()
+                    : 0;
+                frame.hi = Math.min(dist + k, frame.childCount - 1);
+                frame.entered = true;
+            }
+
+            boolean descended = false;
+
+            while(frame.nextChild < frame.childCount){
+                int childIndex = frame.nextChild++;
+
+                if(!frame.node.subtreeExists(childIndex))
+                    continue;
+
+                if(childIndex >= frame.lo
+                        && childIndex <= frame.hi
+                        && frame.node.minFreq(childIndex) <= maxFreq){
+                    stack.push(new RemovalFrame(frame.node.get(childIndex)));
+                    descended = true;
+                    break;
+                }
+
+                frame.minFreq = Math.min(frame.minFreq, frame.node.minFreq(childIndex));
+                frame.subtreeExists |= frame.node.subtreeExists(childIndex);
+            }
+
+            if(descended)
+                continue;
+
+            frame.node.setSubtreeExists(frame.subtreeExists);
+            frame.node.setMinFreq(frame.minFreq);
+            stack.pop();
+
+            if(!stack.isEmpty()){
+                RemovalFrame parent = stack.peek();
+                parent.minFreq = Math.min(parent.minFreq, frame.minFreq);
+                parent.subtreeExists |= frame.subtreeExists;
             }
         }
-
-        curr.setSubtreeExists(subtreeExists);
-        curr.setMinFreq(minFreq);
     }
 
     private void insertBKTree(Node curr, BitSet umi, int length, int freq){
@@ -268,6 +385,16 @@ public class NgramBKTree implements DataStructure{
         }
     }
 
+    private static class RemovalFrame{
+        private final Node node;
+        private boolean entered, subtreeExists;
+        private int lo, hi, nextChild, childCount, minFreq;
+
+        RemovalFrame(Node node){
+            this.node = node;
+        }
+    }
+
     private static class Node{
         private BitSet umi;
         private boolean subtreeExists;
@@ -339,7 +466,7 @@ public class NgramBKTree implements DataStructure{
         }
     }
 
-    private static class Interval implements Comparable{
+    private static class Interval implements Comparable<Interval>{
         private BitSet s;
         private int lo, hi, hash;
 
@@ -383,21 +510,20 @@ public class NgramBKTree implements DataStructure{
         }
 
         @Override
-        public int compareTo(Object o){
-            Interval other = (Interval)o;
+        public int compareTo(Interval other){
 
             if(lo != other.lo)
-                return lo - other.lo;
+                return Integer.compare(lo, other.lo);
 
             if(hi != other.hi)
-                return hi - other.hi;
+                return Integer.compare(hi, other.hi);
 
             for(int i = 0; i < hi - lo + 1; i++){
                 int a = get(i);
                 int b = other.get(i);
 
                 if(a != b)
-                    return a - b;
+                    return Integer.compare(a, b);
             }
 
             return 0;

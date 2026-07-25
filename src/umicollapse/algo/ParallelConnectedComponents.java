@@ -6,11 +6,15 @@ import java.util.Set;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.Collections;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.stream.IntStream;
 
 import umicollapse.util.BitSet;
 import umicollapse.data.ParallelDataStructure;
 import umicollapse.util.ReadFreq;
+import umicollapse.util.UmiFreq;
 import umicollapse.util.Read;
 import umicollapse.util.ClusterTracker;
 
@@ -23,12 +27,14 @@ public class ParallelConnectedComponents implements ParallelAlgorithm{
 
         Map<BitSet, Integer> m = new HashMap<>();
         BitSet[] idxToUMI = new BitSet[reads.size()];
+        List<BitSet> sortedUmis = new ArrayList<>(reads.keySet());
+        Collections.sort(sortedUmis);
 
         int idx = 0;
 
-        for(Map.Entry<BitSet, ReadFreq> e : reads.entrySet()){
-            m.put(e.getKey(), e.getValue().freq);
-            idxToUMI[idx++] = e.getKey();
+        for(BitSet umi : sortedUmis){
+            m.put(umi, reads.get(umi).freq);
+            idxToUMI[idx++] = umi;
         }
 
         data.init(m, umiLength, k);
@@ -49,30 +55,43 @@ public class ParallelConnectedComponents implements ParallelAlgorithm{
         List<Read> res = new ArrayList<>();
         Set<BitSet> visited = new HashSet<>();
 
-        for(BitSet umi : reads.keySet()){
+        for(BitSet umi : sortedUmis){
             if(!visited.contains(umi))
-                res.add(visitAndRemove(umi, reads, adj, visited).read);
+                res.add(visitAndRemove(umi, reads, adj, visited).readFreq.read);
         }
 
         return res;
     }
 
-    private ReadFreq visitAndRemove(BitSet u, Map<BitSet, ReadFreq> reads, Map<BitSet, Set<BitSet>> adj, Set<BitSet> visited){
-        if(visited.contains(u))
-            return null;
+    private UmiFreq visitAndRemove(BitSet u, Map<BitSet, ReadFreq> reads, Map<BitSet, Set<BitSet>> adj, Set<BitSet> visited){
+        UmiFreq max = new UmiFreq(u, reads.get(u));
+        Deque<BitSet> pending = new ArrayDeque<>();
+        Deque<BitSet> children = new ArrayDeque<>();
+        // Discovery is query-local: mark on enqueue so dense graphs cannot
+        // accumulate duplicate pending entries before a node is visited.
+        Set<BitSet> scheduled = new HashSet<>();
+        scheduled.add(u);
+        pending.push(u);
 
-        ReadFreq max = reads.get(u);
-        Set<BitSet> c = adj.get(u);
-        visited.add(u);
+        while(!pending.isEmpty()){
+            BitSet current = pending.pop();
 
-        for(BitSet v : c){
-            if(u.equals(v))
+            if(!visited.add(current))
                 continue;
 
-            ReadFreq r = visitAndRemove(v, reads, adj, visited);
+            ReadFreq candidate = reads.get(current);
+            int frequencyOrder = Integer.compare(candidate.freq, max.readFreq.freq);
 
-            if(r != null && r.freq > max.freq)
-                max = r;
+            if(frequencyOrder > 0 || (frequencyOrder == 0 && current.compareTo(max.umi) < 0))
+                max = new UmiFreq(current, candidate);
+
+            for(BitSet v : adj.get(current)){
+                if(!current.equals(v) && !visited.contains(v) && scheduled.add(v))
+                    children.addLast(v);
+            }
+
+            while(!children.isEmpty())
+                pending.push(children.removeLast());
         }
 
         return max;

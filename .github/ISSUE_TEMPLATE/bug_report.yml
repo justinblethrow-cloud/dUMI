@@ -1,0 +1,106 @@
+name: Bug report
+description: Report incorrect behavior, a crash, or an unexpected result
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve dUMI. Please use non-sensitive data and redact identifying paths, filenames, and sample names.
+
+  - type: input
+    id: version
+    attributes:
+      label: dUMI version or commit
+      description: Provide a release version, tag, or full Git commit SHA.
+      placeholder: "Example: v2.0.0 or 0123456789abcdef..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the operating system, architecture, Java vendor, and Java version.
+      placeholder: |
+        OS: Ubuntu 24.04 x86_64
+        Java: OpenJDK 21.0.2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: input_mode
+    attributes:
+      label: Input mode
+      options:
+        - FASTQ
+        - SAM
+        - BAM
+    validations:
+      required: true
+
+  - type: textarea
+    id: input_properties
+    attributes:
+      label: Input properties
+      description: Describe the relevant input properties, such as single- or paired-end, sort order, BAM index availability, UMI location/tag and length, and whether records are tagged.
+      placeholder: "Example: paired-end coordinate-sorted BAM with a BAI index; 12-base read-name UMI"
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command
+      description: Paste the complete command, with sensitive paths, filenames, and sample identifiers redacted consistently.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect dUMI to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include output counts or other concrete observations where useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and error output
+      description: Paste the complete relevant output after redacting sensitive information.
+      render: text
+
+  - type: textarea
+    id: fixture
+    attributes:
+      label: Minimal reproducible fixture
+      description: Attach or link the smallest non-sensitive synthetic or reduced input that reproduces the issue, plus the command needed to run it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add anything else that may help reproduce or diagnose the issue.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched the existing issues for this problem.
+          required: true
+        - label: I removed sensitive data and identifying sample information.
+          required: true

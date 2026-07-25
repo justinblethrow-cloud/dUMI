@@ -15,8 +15,25 @@ SHA256="$ROOT_DIR/scripts/sha256.sh"
 
 mkdir -p "$LIB_DIR"
 
-while read -r filename expected_sha256 url; do
+while read -r filename expected_sha256 url extra; do
     [[ -z ${filename:-} || $filename == \#* ]] && continue
+
+    if [[ -n ${extra:-} ]]; then
+        echo "error: malformed dependency entry in dependencies.lock: $filename" >&2
+        exit 1
+    fi
+    if [[ ! $filename =~ ^[0-9A-Za-z._+-]+[.]jar$ ]]; then
+        echo "error: invalid dependency filename in dependencies.lock: $filename" >&2
+        exit 1
+    fi
+    if [[ ! $expected_sha256 =~ ^[0-9a-f]{64}$ ]]; then
+        echo "error: invalid dependency SHA-256 in dependencies.lock: $filename" >&2
+        exit 1
+    fi
+    if [[ $url != https://* ]]; then
+        echo "error: dependency URL must use HTTPS: $filename" >&2
+        exit 1
+    fi
 
     destination="$LIB_DIR/$filename"
 

@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 11
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Validate release tag and repository
+        shell: bash
+        run: |
+          if [[ ! $GITHUB_REF_NAME =~ ^v[0-9]+[.][0-9]+[.][0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "error: release tag must be a semantic version such as v1.2.0" >&2
+            exit 1
+          fi
+          if [[ $(git rev-list -n 1 "$GITHUB_REF_NAME") != "$(git rev-parse HEAD)" ]]; then
+            echo "error: checked-out commit does not match release tag $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          if [[ -n $(git status --porcelain --untracked-files=all) ]]; then
+            echo "error: release checkout is not clean" >&2
+            git status --short >&2
+            exit 1
+          fi
+          if git ls-files --error-unmatch umicollapse.jar >/dev/null 2>&1; then
+            echo "error: umicollapse.jar is generated and must not be tracked" >&2
+            exit 1
+          fi
+
+      - name: Test tagged source
+        run: ./scripts/check.sh
+
+      - name: Verify byte-for-byte reproducibility
+        run: ./scripts/check-reproducible-build.sh
+
+      - name: Build release assets
+        run: ./scripts/build-release.sh "$GITHUB_REF_NAME"
+
+      - name: Attest release provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: '${{ github.workspace }}/dist/*'
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          release_version=${GITHUB_REF_NAME#v}
+          release_notes="$RUNNER_TEMP/release-notes.md"
+          awk -v target="## $release_version - " '
+            index($0, target) == 1 {
+              found = 1
+              next
+            }
+            found && /^## / {
+              exit
+            }
+            found {
+              print
+            }
+            END {
+              if (!found)
+                exit 2
+            }
+          ' "$GITHUB_WORKSPACE/CHANGELOG.md" > "$release_notes"
+          if [[ ! -s $release_notes ]]; then
+            echo "error: CHANGELOG.md has no release notes for $release_version" >&2
+            exit 1
+          fi
+
+          verify_remote_assets() {
+            local remote_count
+            remote_count=$(gh api \
+              "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
+              --jq '.assets | length')
+            if [[ $remote_count -ne ${#assets[@]} ]]; then
+              echo "error: release has $remote_count assets; expected ${#assets[@]}" >&2
+              return 1
+            fi
+
+            local asset name local_digest remote_digest
+            for asset in "${assets[@]}"; do
+              name=$(basename "$asset")
+              local_digest="sha256:$("$GITHUB_WORKSPACE/scripts/sha256.sh" "$asset")"
+              remote_digest=$(gh api \
+                "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
+                --jq ".assets[] | select(.name == \"$name\") | .digest")
+              if [[ -z $remote_digest || $remote_digest != "$local_digest" ]]; then
+                echo "error: published asset digest differs or is unavailable: $name" >&2
+                echo "local:  $local_digest" >&2
+                echo "remote: ${remote_digest:-missing}" >&2
+                return 1
+              fi
+            done
+          }
+
+          assets=("$GITHUB_WORKSPACE"/dist/*)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            is_draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')
+            if [[ $is_draft == true ]]; then
+              gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+              verify_remote_assets
+              gh release edit "$GITHUB_REF_NAME" \
+                --notes-file "$release_notes" \
+                --draft=false
+            else
+              verify_remote_assets
+              echo "Published release already has byte-identical assets; no mutation performed."
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --verify-tag \
+              --notes-file "$release_notes" \
+              --title "dUMI $GITHUB_REF_NAME"
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}"
+            verify_remote_assets
+            gh release edit "$GITHUB_REF_NAME" --draft=false
+          fi

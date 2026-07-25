@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use dUMI, cite this software and the original UMICollapse paper."
+title: "dUMI"
+type: software
+authors:
+  - name: "dUMI contributors"
+abstract: >-
+  dUMI is a maintained fork of UMICollapse that adds guarded streaming for
+  compatible coordinate-sorted single-end SAM/BAM input, optimized UMI
+  processing, and reproducible cross-platform validation.
+license: MIT
+repository-code: "https://github.com/justinblethrow-cloud/dUMI"
+keywords:
+  - unique molecular identifier
+  - UMI
+  - deduplication
+  - SAM
+  - BAM
+  - bioinformatics
+references:
+  - type: article
+    authors:
+      - family-names: "Liu"
+        given-names: "Daniel"
+    title: "Algorithms for efficiently collapsing reads with Unique Molecular Identifiers"
+    journal: "PeerJ"
+    volume: 7
+    pages: "e8275"
+    year: 2019
+    doi: "10.7717/peerj.8275"

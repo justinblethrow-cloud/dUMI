@@ -1,0 +1,30 @@
+name: Dependency audit
+
+on:
+  pull_request:
+    paths:
+      - dependencies.lock
+      - scripts/audit-dependencies.py
+      - .github/workflows/dependency-audit.yml
+  schedule:
+    - cron: '17 09 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  osv:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - name: Audit locked Maven artifacts with OSV
+        run: python3 scripts/audit-dependencies.py

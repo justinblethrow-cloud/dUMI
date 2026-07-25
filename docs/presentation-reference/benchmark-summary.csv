@@ -1,0 +1,1 @@
+benchmark_id,workload_id,workload_description,implementation,commit,streaming_mode,repetitions,elapsed_median_seconds,elapsed_min_seconds,elapsed_max_seconds,max_rss_median_kib,max_rss_min_kib,max_rss_max_kib,record_equivalence,input_sha256,results_source

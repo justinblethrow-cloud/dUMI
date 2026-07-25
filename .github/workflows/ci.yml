@@ -5,32 +5,85 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
+  repository-hygiene:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Reject tracked build artifacts
+        run: |
+          if git ls-files --error-unmatch umicollapse.jar >/dev/null 2>&1; then
+            echo "error: umicollapse.jar is generated and must not be tracked" >&2
+            exit 1
+          fi
+
+      - name: Validate archive-local documentation links
+        run: python3 scripts/check-local-markdown-links.py .
+
+      - name: Validate Python and shell tooling
+        shell: bash
+        run: |
+          python3 -m py_compile \
+            scripts/*.py \
+            scripts/benchmark/*.py \
+            scripts/profile/*.py
+          bash -n \
+            build.sh \
+            run.sh \
+            test.sh \
+            umicollapse \
+            scripts/*.sh \
+            test/*.sh
+
   build-and-test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             java: '11'
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             java: '21'
-          - os: macos-latest
+          - os: macos-15
             java: '11'
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
 
       - name: Build and verify
         run: ./scripts/check.sh
+
+  reproducible-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Java 11
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Verify byte-for-byte reproducibility
+        run: ./scripts/check-reproducible-build.sh

@@ -4,6 +4,8 @@ import java.util.Set;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 import umicollapse.util.BitSet;
 import static umicollapse.util.Utils.umiDist;
@@ -49,24 +51,30 @@ public class ParallelFenwickBKTree implements ParallelDataStructure{
         int freqIdx = floorEntry.getValue() + 1;
 
         for(; freqIdx > 0; freqIdx -= freqIdx & (-freqIdx))
-            recursiveNear(umi, fenwick[freqIdx], k, res);
+            nearIterative(umi, fenwick[freqIdx], k, res);
 
         return res;
     }
 
-    private void recursiveNear(BitSet umi, Node curr, int k, Set<BitSet> res){
-        int dist = umiDist(umi, curr.getUMI());
+    private void nearIterative(BitSet umi, Node start, int k, Set<BitSet> res){
+        Deque<Node> stack = new ArrayDeque<>();
+        stack.push(start);
 
-        if(dist <= k)
-            res.add(curr.getUMI());
+        while(!stack.isEmpty()){
+            Node curr = stack.pop();
+            int dist = umiDist(umi, curr.getUMI());
 
-        if(curr.hasNodes()){
-            int lo = Math.max(dist - k, 0);
-            int hi = Math.min(dist + k, umiLength);
+            if(dist <= k)
+                res.add(curr.getUMI());
 
-            for(int i = lo; i <= hi; i++){
-                if(curr.hasNode(i))
-                    recursiveNear(umi, curr.get(i), k, res);
+            if(curr.hasNodes()){
+                int lo = Math.max(dist - k, 0);
+                int hi = Math.min(dist + k, umiLength);
+
+                for(int i = hi; i >= lo; i--){
+                    if(curr.hasNode(i))
+                        stack.push(curr.get(i));
+                }
             }
         }
     }

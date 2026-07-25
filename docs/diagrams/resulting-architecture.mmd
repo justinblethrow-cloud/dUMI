@@ -1,0 +1,12 @@
+flowchart LR
+    CLI["Main: parse mode and strategies"] --> ROUTE{"Execution route"}
+    ROUTE -->|"FASTQ, paired, tagged, parallel, two-pass, or off"| LEGACY["Compatible legacy path"]
+    ROUTE -->|"Eligible SAM / BAM"| GUARD["Streaming eligibility and runtime guards"]
+    GUARD --> ACTIVE["Active alignment groups plus flush queue"]
+    ACTIVE --> CORE["Shared optimized clustering core"]
+    LEGACY --> CORE
+    CORE --> TEMP["Transactionally staged output"]
+    TEMP --> PROMOTE["Promote completed output"]
+    GUARD -->|"auto: contract violation"| RETRY["Discard temporary output and retry legacy"]
+    RETRY --> LEGACY
+    GUARD -->|"on: contract violation"| FAIL["Fail without replacing destination"]

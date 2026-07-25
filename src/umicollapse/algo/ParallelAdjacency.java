@@ -34,7 +34,14 @@ public class ParallelAdjacency implements ParallelAlgorithm{
             idx++;
         }
 
-        Arrays.parallelSort(freq, (a, b) -> b.readFreq.freq - a.readFreq.freq);
+        Arrays.parallelSort(freq, (a, b) -> {
+            int frequencyOrder = Integer.compare(b.readFreq.freq, a.readFreq.freq);
+
+            if(frequencyOrder != 0)
+                return frequencyOrder;
+
+            return a.umi.compareTo(b.umi);
+        });
         data.init(m, umiLength, k);
 
         List<Set<BitSet>> adj = new ArrayList<>();

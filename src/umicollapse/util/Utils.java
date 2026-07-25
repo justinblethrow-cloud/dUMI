@@ -19,15 +19,13 @@ public class Utils{
     }
 
     public static BitSet charSet(BitSet a, int idx, int b){
-        for(int i = 0; i < Read.ENCODING_LENGTH; i++)
-            a.set(idx * Read.ENCODING_LENGTH + i, ((b & (1 << i)) != 0));
-
-        return a;
-    }
-
-    private static BitSet charSetNBit(BitSet a, int idx){
-        for(int i = 0; i < Read.ENCODING_LENGTH; i++)
-            a.setNBit(idx * Read.ENCODING_LENGTH + i, true);
+        /*
+         * Generated keys must preserve the same N metadata as keys produced
+         * by toBitSet.  setEncodedBase is the authoritative base mutation:
+         * it marks undetermined bases and clears any stale N mask when a
+         * recursion branch reuses this position for an ordinary base.
+         */
+        a.setEncodedBase(idx, b);
 
         return a;
     }

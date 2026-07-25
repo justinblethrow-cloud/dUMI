@@ -1,0 +1,11 @@
+flowchart LR
+    CLI["Main: parse mode and strategies"] --> MODE{"Input mode"}
+    MODE -->|"SAM / BAM"| SAM["HTSJDK reader and filters"]
+    MODE -->|"FASTQ"| FQ["FASTQ reader"]
+    SAM --> KEY["Alignment key and UMI extraction"]
+    FQ --> FQKEY["Read-length group and sequence UMI"]
+    KEY --> AGG["Whole-input group map and exact-UMI merge"]
+    FQKEY --> AGG
+    AGG --> ALGO["Clustering algorithm"]
+    ALGO <--> DATA["Neighbor-search data structure"]
+    ALGO --> OUT["Representative reads or tagged records"]

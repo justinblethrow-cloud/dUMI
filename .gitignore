@@ -1,6 +1,10 @@
 /bin/
 /build/
+/dist/
 /lib/
 /test-output/
 /test/example/
 /.tools/
+/umicollapse.jar
+__pycache__/
+*.py[cod]

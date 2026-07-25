@@ -1,0 +1,72 @@
+name: Feature request
+description: Propose a new capability, compatibility improvement, or scientific workflow enhancement
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please explain the concrete workflow need and how the proposed behavior can be validated.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Describe the limitation or workflow need, including the input mode and scale where relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Scientific or compatibility rationale
+      description: Explain why this matters for result validity, reproducibility, interoperability, or tool compatibility.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the requested interface and expected output as precisely as possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Suggested validation
+      description: Describe fixtures, reference results, benchmarks, or downstream checks that could establish correctness.
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility considerations
+      description: Note any effects on existing commands, file formats, output ordering, resource use, Java versions, or upstream UMICollapse behavior.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe current workarounds or other designs you considered.
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to help implement or test this feature.
+          required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched the existing issues and pull requests for a similar request.
+          required: true
+        - label: I removed sensitive data and identifying sample information.
+          required: true

@@ -1,7 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+SOURCE=${BASH_SOURCE[0]}
+symlink_depth=0
+while [[ -h $SOURCE ]]; do
+    symlink_depth=$((symlink_depth + 1))
+    if (( symlink_depth > 40 )); then
+        echo "error: launcher symlink chain exceeds 40 links" >&2
+        exit 1
+    fi
+
+    SOURCE_DIR=$(cd -P -- "$(dirname -- "$SOURCE")" && pwd)
+    LINK_TARGET=$(readlink "$SOURCE")
+    if [[ $LINK_TARGET == /* ]]; then
+        SOURCE=$LINK_TARGET
+    else
+        SOURCE="$SOURCE_DIR/$LINK_TARGET"
+    fi
+done
+ROOT_DIR=$(cd -P -- "$(dirname -- "$SOURCE")" && pwd)
 
 if [[ -n ${JAVA:-} ]]; then
     JAVA_BIN=$JAVA
@@ -16,7 +33,7 @@ fi
 if [[ -n ${UMICOLLAPSE_JAVA_OPTS:-} ]]; then
     java_opts=()
     read -r -a java_opts <<< "$UMICOLLAPSE_JAVA_OPTS"
-    exec "$JAVA_BIN" -server -Xss20M "${java_opts[@]}" -jar "$ROOT_DIR/umicollapse.jar" "$@"
+    exec "$JAVA_BIN" "${java_opts[@]}" -jar "$ROOT_DIR/umicollapse.jar" "$@"
 fi
 
-exec "$JAVA_BIN" -server -Xss20M -jar "$ROOT_DIR/umicollapse.jar" "$@"
+exec "$JAVA_BIN" -jar "$ROOT_DIR/umicollapse.jar" "$@"

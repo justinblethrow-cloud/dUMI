@@ -3,6 +3,8 @@ package umicollapse.data;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 import umicollapse.util.BitSet;
 import static umicollapse.util.Utils.umiDist;
@@ -34,24 +36,32 @@ public class ParallelBKTree implements ParallelDataStructure{
     public Set<BitSet> near(BitSet umi, int k, int maxFreq){
         Set<BitSet> res = new HashSet<>();
         res.add(umi);
-        recursiveNear(umi, root, k, maxFreq, res);
+        nearIterative(umi, root, k, maxFreq, res);
         return res;
     }
 
-    private void recursiveNear(BitSet umi, Node curr, int k, int maxFreq, Set<BitSet> res){
-        int dist = umiDist(umi, curr.getUMI());
+    private void nearIterative(BitSet umi, Node start, int k, int maxFreq, Set<BitSet> res){
+        Deque<Node> stack = new ArrayDeque<>();
+        stack.push(start);
 
-        if(dist <= k && curr.getFreq() <= maxFreq)
-            res.add(curr.getUMI());
+        while(!stack.isEmpty()){
+            Node curr = stack.pop();
+            int dist = umiDist(umi, curr.getUMI());
 
-        if(curr.hasNodes()){
-            int lo = Math.max(dist - k, 0);
-            int hi = Math.min(dist + k, umiLength);
+            if(dist <= k && curr.getFreq() <= maxFreq)
+                res.add(curr.getUMI());
 
-            for(int i = 0; i < umiLength + 1; i++){
-                if(curr.hasNode(i)){
-                    if(i >= lo && i <= hi && curr.minFreq(i) <= maxFreq)
-                        recursiveNear(umi, curr.get(i), k, maxFreq, res);
+            if(curr.hasNodes()){
+                int lo = Math.max(dist - k, 0);
+                int hi = Math.min(dist + k, umiLength);
+
+                /*
+                 * Push in reverse so the explicit LIFO stack preserves the
+                 * recursive implementation's ascending child visitation.
+                 */
+                for(int i = hi; i >= lo; i--){
+                    if(curr.hasNode(i) && curr.minFreq(i) <= maxFreq)
+                        stack.push(curr.get(i));
                 }
             }
         }
