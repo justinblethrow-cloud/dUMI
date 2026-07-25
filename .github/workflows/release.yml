@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   id-token: write
@@ -29,7 +33,7 @@ jobs:
       - name: Validate release tag and repository
         shell: bash
         run: |
-          if [[ ! $GITHUB_REF_NAME =~ ^v[0-9]+[.][0-9]+[.][0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+          if [[ ! $GITHUB_REF_NAME =~ ^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(-[0-9A-Za-z-]+([.][0-9A-Za-z-]+)*)?([+][0-9A-Za-z-]+([.][0-9A-Za-z-]+)*)?$ ]]; then
             echo "error: release tag must be a semantic version such as v1.2.0" >&2
             exit 1
           fi
@@ -67,6 +71,12 @@ jobs:
         shell: bash
         run: |
           release_version=${GITHUB_REF_NAME#v}
+          release_version_without_build=${release_version%%+*}
+          release_prerelease=false
+          if [[ $release_version_without_build == *-* ]]; then
+            release_prerelease=true
+          fi
+          release_title="dUMI $GITHUB_REF_NAME"
           release_notes="$RUNNER_TEMP/release-notes.md"
           awk -v target="## $release_version - " '
             index($0, target) == 1 {
@@ -89,10 +99,18 @@ jobs:
             exit 1
           fi
 
+          find_release_id() {
+            gh api \
+              --paginate \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id"
+          }
+
           verify_remote_assets() {
+            local release_id=$1
             local remote_count
             remote_count=$(gh api \
-              "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
               --jq '.assets | length')
             if [[ $remote_count -ne ${#assets[@]} ]]; then
               echo "error: release has $remote_count assets; expected ${#assets[@]}" >&2
@@ -104,7 +122,7 @@ jobs:
               name=$(basename "$asset")
               local_digest="sha256:$("$GITHUB_WORKSPACE/scripts/sha256.sh" "$asset")"
               remote_digest=$(gh api \
-                "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
+                "repos/$GITHUB_REPOSITORY/releases/$release_id" \
                 --jq ".assets[] | select(.name == \"$name\") | .digest")
               if [[ -z $remote_digest || $remote_digest != "$local_digest" ]]; then
                 echo "error: published asset digest differs or is unavailable: $name" >&2
@@ -115,26 +133,81 @@ jobs:
             done
           }
 
+          verify_release_metadata() {
+            local release_id=$1
+            local expected_body actual_body actual_title actual_draft actual_prerelease
+            expected_body=$(<"$release_notes")
+            actual_body=$(gh api \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              --jq '.body')
+            actual_title=$(gh api \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              --jq '.name')
+            actual_draft=$(gh api \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              --jq '.draft')
+            actual_prerelease=$(gh api \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              --jq '.prerelease')
+            if [[ $actual_body != "$expected_body" \
+                  || $actual_title != "$release_title" \
+                  || $actual_draft != false \
+                  || $actual_prerelease != "$release_prerelease" ]]; then
+              echo "error: release metadata differs from the tagged source" >&2
+              return 1
+            fi
+          }
+
+          publish_release() {
+            local release_id=$1
+            gh api \
+              --method PATCH \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              -f name="$release_title" \
+              -F body=@"$release_notes" \
+              -F prerelease="$release_prerelease" \
+              -F draft=false \
+              >/dev/null
+            verify_release_metadata "$release_id"
+          }
+
           assets=("$GITHUB_WORKSPACE"/dist/*)
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            is_draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')
+          release_id=$(find_release_id)
+          if [[ -n $release_id ]]; then
+            if [[ ! $release_id =~ ^[0-9]+$ ]]; then
+              echo "error: expected one numeric release ID for $GITHUB_REF_NAME" >&2
+              exit 1
+            fi
+            is_draft=$(gh api \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              --jq '.draft')
             if [[ $is_draft == true ]]; then
               gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
-              verify_remote_assets
-              gh release edit "$GITHUB_REF_NAME" \
-                --notes-file "$release_notes" \
-                --draft=false
+              verify_remote_assets "$release_id"
+              publish_release "$release_id"
             else
-              verify_remote_assets
+              verify_remote_assets "$release_id"
+              verify_release_metadata "$release_id"
               echo "Published release already has byte-identical assets; no mutation performed."
             fi
           else
-            gh release create "$GITHUB_REF_NAME" \
-              --draft \
-              --verify-tag \
-              --notes-file "$release_notes" \
-              --title "dUMI $GITHUB_REF_NAME"
+            create_args=(
+              "$GITHUB_REF_NAME"
+              --draft
+              --verify-tag
+              --notes-file "$release_notes"
+              --title "$release_title"
+            )
+            if [[ $release_prerelease == true ]]; then
+              create_args+=(--prerelease)
+            fi
+            gh release create "${create_args[@]}"
+            release_id=$(find_release_id)
+            if [[ ! $release_id =~ ^[0-9]+$ ]]; then
+              echo "error: draft release was created but could not be found" >&2
+              exit 1
+            fi
             gh release upload "$GITHUB_REF_NAME" "${assets[@]}"
-            verify_remote_assets
-            gh release edit "$GITHUB_REF_NAME" --draft=false
+            verify_remote_assets "$release_id"
+            publish_release "$release_id"
           fi

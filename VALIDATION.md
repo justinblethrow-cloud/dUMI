@@ -1,25 +1,21 @@
 # dUMI v2.0.0 validation record
 
-Status: **source acceptance complete; release publication not yet executed**.
+Status: **source acceptance and v2.0.0 release publication complete**.
 
 This record accepts the exact production-source and measured-harness freeze
-below for v2.0.0 publication. The final tag target may add documentation,
-curated evidence, and path-neutral publication-policy cleanup that does not
-change production sources or the sealed measurements. An annotated tag cannot
-identify its own Git object or future workflow runs without changing that
-object. Exact final identities, generated artifact hashes, workflow URLs, and
-attestations therefore belong to Git, GitHub Actions, release `SHA256SUMS`,
-build receipts, and GitHub attestations rather than placeholders inside the
-tagged source.
+below and records the completed v2.0.0 publication. Because tagged source
+cannot self-identify workflow runs or assets generated after its commit, the
+final identities, hashes, and attestations are recorded here from Git, GitHub
+Actions, the published release, and independently downloaded assets.
 
 | Field | Value |
 | --- | --- |
 | Record finalized | 2026-07-25 UTC |
-| Release identity | `v2.0.0`; the annotated tag is created only after the publication gate below |
+| Release identity | [`v2.0.0`](https://github.com/justinblethrow-cloud/dUMI/releases/tag/v2.0.0) |
 | Production-source and measured-harness freeze | [`299532964a57905c835bd750563988a09af6e1df`](https://github.com/justinblethrow-cloud/dUMI/commit/299532964a57905c835bd750563988a09af6e1df) |
-| Final release commit | The `v2.0.0` tag target, descending from the freeze above; intentionally not self-identified here |
+| Final release commit | [`92680cd98addce59f39da2dc39215b63e40ce58b`](https://github.com/justinblethrow-cloud/dUMI/commit/92680cd98addce59f39da2dc39215b63e40ce58b) |
 | Canonical upstream baseline | [`efeab35f5d29dec1d496ade3f681eeb34d9c2057`](https://github.com/Daniel-Liu-c0deb0t/UMICollapse/commit/efeab35f5d29dec1d496ade3f681eeb34d9c2057) |
-| Final acceptance decision | **Accepted for publication**, subject only to the external publication gate recorded below |
+| Final acceptance decision | **Published and externally verified** |
 
 ## Scope
 
@@ -82,20 +78,16 @@ The published CI matrix is defined by
 - macOS 15 with Java 11;
 - a separate Ubuntu 24.04, Java 11 reproducible-build job.
 
-The CI workflow and its third-party actions are commit-SHA pinned. This source
-record deliberately does not invent or embed future workflow URLs. At record
-finalization the local gates were complete, while the final branch, dependency
-audit, and tag-release workflows had not yet been executed. Before publishing
-the tag:
+The CI workflow and its third-party actions are commit-SHA pinned. All
+publication workflows completed successfully:
 
-- the final release commit must pass the defined Linux and macOS CI matrix
-  without changing the accepted production-source hash;
-- the network dependency-audit workflow must report no active advisories; and
-- the tagged release workflow must build and verify the archive, SBOM,
-  checksums, receipt, and GitHub provenance attestation.
+- [main-branch CI run 30175044210](https://github.com/justinblethrow-cloud/dUMI/actions/runs/30175044210);
+- [dependency-audit run 30175085188](https://github.com/justinblethrow-cloud/dUMI/actions/runs/30175085188);
+- [tag CI run 30175110090](https://github.com/justinblethrow-cloud/dUMI/actions/runs/30175110090); and
+- [release run 30175110095, attempt 2](https://github.com/justinblethrow-cloud/dUMI/actions/runs/30175110095/attempts/2).
 
-The resulting run URLs and generated digests are external publication
-evidence maintained by GitHub and the release assets.
+The release workflow built and verified the archive, SBOM, checksums, receipt,
+and GitHub provenance attestations from the final tag target.
 
 ## Local verification gate
 
@@ -234,8 +226,9 @@ active advisory is returned, and treats an unreachable or malformed OSV
 response as an audit error rather than a clean result.
 
 Final local OSV result: **Pass on 2026-07-25 UTC**. The live query returned no
-active advisories for either locked Maven package. The publication workflow
-must repeat this network check immediately before release.
+active advisories for either locked Maven package. The published
+[dependency-audit workflow](https://github.com/justinblethrow-cloud/dUMI/actions/runs/30175085188)
+repeated the network check successfully before release.
 
 An advisory query is a point-in-time check, not proof that a dependency is free
 of vulnerabilities. Optional HTSJDK features outside the exercised
@@ -273,9 +266,12 @@ and publishes only those tagged assets.
 | JAR SHA-256, first Java 11 build | `ca3da2914342d365cb3dbec065fc68743ca45a0de0032aa40e3f076ad3c1807e` |
 | JAR SHA-256, second Java 11 build | `ca3da2914342d365cb3dbec065fc68743ca45a0de0032aa40e3f076ad3c1807e` |
 | Byte-for-byte JAR comparison | **Pass** |
-| Release archive SHA-256 | Generated from the final tagged tree and recorded in release `SHA256SUMS`; intentionally not self-embedded |
-| SPDX SBOM generation and structural inspection | Required tag-workflow publication evidence; not executed before the tag exists |
-| GitHub provenance attestation | Generated and hosted by GitHub after tag publication; intentionally external to this source record |
+| Published `BUILD-RECEIPT-2.0.0.properties` SHA-256 | `3cdff74cac0815e02cc989803f201d3a35745a7db9eaf1a44dab322e1e7b56a6` |
+| Published `SHA256SUMS` SHA-256 | `dc32c0b2696efe049192858cd547b2864479dd248e26b02f97daf20cc63ac456` |
+| Published `dumi-2.0.0.spdx` SHA-256 | `bc1844ced45e0b1374ae70e75fa3d40a0c301b0f5d69670dad8b819b853f10a0` |
+| Published `dumi-2.0.0.tar.gz` SHA-256 | `5a8b0ac6260286c8b45715ba2f727b445db140afd252185080912f86501439a9` |
+| Downloaded release checksum verification | **Pass** |
+| GitHub provenance attestation | **Pass** — all four published assets bind to tag `v2.0.0` and commit `92680cd98addce59f39da2dc39215b63e40ce58b` |
 
 The generated `umicollapse.jar`, build directories, and release directory are
 not source-controlled release authority. The tagged source, dependency lock,
@@ -387,26 +383,21 @@ equivalence test justify it.
       performance claims.
 - [x] Independent code, benchmark, documentation, and release-workflow reviews
       have no unresolved release-blocking findings.
+- [x] Main and tag CI, the network dependency audit, and release workflow pass
+      for the final tag target.
+- [x] All four release assets verify after download and have GitHub provenance
+      attestations bound to `v2.0.0` and its target commit.
 
-## Publication gate
+## Publication outcome
 
-Source acceptance does not claim that a GitHub release already exists. Before
-the annotated `v2.0.0` tag is published:
-
-1. the final documentation/evidence commit must pass the Linux Java 11/21,
-   macOS Java 11, repository-hygiene, and reproducible-build jobs;
-2. the live dependency-audit workflow must pass;
-3. `scripts/build-release.sh v2.0.0` must produce and verify the archive,
-   SPDX SBOM, checksums, licenses/notices, launcher, and build receipt from the
-   clean tag target; and
-4. the release workflow must publish those assets and request GitHub build
-   provenance attestations.
-
-These results are necessarily identified by the eventual tag, workflow run
-metadata, release asset hashes, and attestations. They are not guessed inside
-the source commit they authenticate.
+The annotated `v2.0.0` tag targets
+[`92680cd98addce59f39da2dc39215b63e40ce58b`](https://github.com/justinblethrow-cloud/dUMI/commit/92680cd98addce59f39da2dc39215b63e40ce58b).
+The final main and tag CI matrices, live dependency audit, reproducible release
+build, remote-asset digest checks, downloaded checksums, and provenance
+attestations all passed. The resulting
+[GitHub release](https://github.com/justinblethrow-cloud/dUMI/releases/tag/v2.0.0)
+contains the four verified assets recorded above.
 
 Final acceptance decision: **the frozen production source, measured validation
-tool snapshot, benchmark, profile, neutral publication cleanup, and public
-documentation are accepted for v2.0.0 publication. Release publication
-remains conditional on the external gate above.**
+tool snapshot, benchmark, profile, neutral publication cleanup, public
+documentation, and published v2.0.0 artifacts are accepted and verified.**
