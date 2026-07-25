@@ -206,10 +206,11 @@ The output directory contains:
   succeeds.
 
 Before a bundle can be sealed `COMPLETE`, the runner scans its textual
-evidence for run-local absolute paths, local user/host identifiers, and
-organization-specific branding. Paths in recorded commands are represented
-with placeholders such as `<EVIDENCE_DIR>` and `<JAVA>`; the exact tool
-versions remain in the environment receipt.
+evidence for private absolute-path roots, exact run-local paths, and local
+user/host identifiers. Paths in recorded commands are represented with
+placeholders such as `<EVIDENCE_DIR>` and `<JAVA>`; the exact tool versions
+remain in the environment receipt. Project-specific public-release language
+review remains a separate repository-level gate.
 
 Large per-run result BAMs are discarded by default after semantic validation;
 their record counts and semantic digests remain in `measurements.tsv`, and

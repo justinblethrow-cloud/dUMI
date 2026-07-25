@@ -1,26 +1,45 @@
 # Changelog
 
-Notable dUMI changes are documented here. The project has not yet published a
-versioned dUMI release, so current work remains under **Unreleased**.
+Notable dUMI changes are documented here.
 
 This file describes the maintained fork, not historical canonical UMICollapse
 releases. See [`PROVENANCE.md`](PROVENANCE.md) for the exact lineage.
 
 ## Unreleased
 
+## 2.0.0 - 2026-07-25
+
 ### Added
 
 - Guarded streaming for compatible coordinate-sorted, single-end SAM/BAM
   input, with `auto`, `on`, and `off` control.
 - Runtime coordinate-order and leading-clipping validation.
-- Transactionally staged output for every advertised CLI route, plus an inner
-  streaming attempt boundary for legacy retry in `auto` mode.
+- Transactionally staged output for every advertised CLI route and direct
+  Java entry point, plus an inner streaming-attempt boundary for safe legacy
+  retry in `auto` mode.
 - Packed-key `NgramBKTree` routing with a general object-key fallback.
-- Differential data-structure tests and a SAM/BAM compatibility and
+- Differential data-structure tests, randomized reference comparisons, and
+  regression coverage for deep trees, `N`-containing keys, threshold edges,
+  parallel traversal, resource cleanup, and output transactions.
+- SAM/BAM/FASTQ command-line integration tests and a SAM/BAM compatibility and
   failure-safety matrix.
-- Checksum-locked runtime dependencies, a clean Java 11-targeted build, and an
-  embedded production-source receipt.
-- Cross-platform CI coverage.
+- A public, reproducible benchmark harness with workload provenance,
+  correctness gates, structured raw output, and paired baseline/candidate
+  execution.
+- Java Flight Recorder allocation-profiling tools and aggregation guidance.
+- Cross-platform CI on supported Java runtimes, repository-hygiene checks, and
+  byte-for-byte reproducible-build verification.
+- Checksum-locked runtime dependencies, a Java 11-targeted build, and an
+  embedded build receipt identifying the exact production-source inputs.
+- A release pipeline that tests the tagged source, assembles a complete
+  source-plus-binary archive, verifies the extracted archive, publishes
+  checksums, an SPDX SBOM, and the build receipt, and creates a provenance
+  attestation.
+- Contributor, security, citation, provenance, third-party licensing,
+  architecture, optimization, limitations, and presentation-reference
+  documentation.
+- Structured bug-report and feature-request forms, a pull-request template,
+  and automated GitHub Actions dependency updates.
 
 ### Changed
 
@@ -30,13 +49,16 @@ releases. See [`PROVENANCE.md`](PROVENANCE.md) for the exact lineage.
 - Sparse streaming groups bypass unnecessary general clustering setup.
 - Algorithm traversal and quality-based representative ties are deterministic;
   the `any` merge policy remains intentionally arbitrary.
-- Component traversal uses explicit work queues rather than component-sized
-  recursion.
+- Component and BK-tree traversal use explicit work queues rather than
+  input-sized recursion.
 - Paired mate recovery supports indexed queries and sequential recovery for SAM
   or unindexed BAM input.
 - The launcher uses JVM heap defaults unless
   `UMICOLLAPSE_JAVA_OPTS` is supplied.
 - Streaming output is explicitly declared `SO:unsorted`.
+- Runtime dependencies are HTSJDK 3.0.5 and snappy-java 1.1.10.8.
+- Generated JARs are no longer tracked; builds and releases are produced from
+  source with deterministic archive metadata.
 
 ### Incorporated
 
@@ -55,10 +77,27 @@ releases. See [`PROVENANCE.md`](PROVENANCE.md) for the exact lineage.
 - Invalid explicit UMI lengths and UMIs shorter than the effective length are
   rejected rather than silently producing ambiguous encodings.
 - Invalid modes, options, ranges, strategy combinations, and same-file
-  input/output requests fail before output processing.
-- Equality/hash contracts and `BitSet` cloning preserve all encoded state.
+  input/output requests fail before output processing, including path aliases
+  and hard links that identify the same file.
+- Equality/hash contracts, generated-key metadata, and `BitSet` cloning
+  preserve all encoded state.
+- Threshold arithmetic, packed-key boundaries, queue capacity, and deep-input
+  traversal avoid overflow and stack-exhaustion failures.
+- Singleton inputs through extension entry points retain the requested merge
+  behavior.
 - Cross-platform shell behavior for Bash 3 and Linux/macOS SHA-256 tooling.
-- Packed-key boundary and capacity handling.
+
+### Security and supply chain
+
+- GitHub Actions are pinned to immutable commit SHAs and run with restricted
+  job permissions.
+- Locked Maven artifacts are audited against OSV on relevant pull requests, on
+  demand, and on a weekly schedule.
+- Release inputs and dependencies are checksum-verified, generated artifacts
+  are rejected from source control, and published assets are verified after
+  upload.
+- Third-party notices and dependency license texts are included in the source
+  tree and release archive.
 
 ## Canonical upstream baseline
 

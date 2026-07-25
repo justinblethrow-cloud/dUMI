@@ -1,0 +1,23 @@
+{
+  "bam": {
+    "bytes": 12154363,
+    "path": "inputs/sparse/records-1000000/input.bam",
+    "sha256": "04a694611309dc09c12ad8e57e4bf5fed38a43786bb585da0d42b4c78d9247d6"
+  },
+  "expected_output_records": 1000000,
+  "expected_output_semantic_sha256": "22b7228cba0d0c35ee5aef376cb36e21b29717043a50a0fe46e30c971b380e0b",
+  "expected_reference_dictionary_sha256": "6216b516ec3a8a9c24ca40a458fc2297b99ed1874119c0eaf24ce5de47f85502",
+  "expected_reference_sequences": 1,
+  "generator_command": "'<PYTHON>' '<EVIDENCE_DIR>/harness/generate_workload.py' sparse --records 1000000 --seed 1729 --output '<EVIDENCE_DIR>/inputs/sparse/records-1000000/input.sam' --metadata '<EVIDENCE_DIR>/inputs/sparse/records-1000000/metadata.json'",
+  "index": {
+    "bytes": 3072,
+    "path": "inputs/sparse/records-1000000/input.bam.bai",
+    "sha256": "5b38bfe6ac91261872c43280367d40b0e2d6260d6b4d6b745a8e24d7db249912"
+  },
+  "input_records": 1000000,
+  "sam": {
+    "bytes": 157889448,
+    "path": "inputs/sparse/records-1000000/input.sam",
+    "sha256": "f0d2d81bdbbce08a1a9c3d4ed33088f4c127ada42844e674850d1d4d4b826102"
+  }
+}

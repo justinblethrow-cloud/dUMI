@@ -1,0 +1,36 @@
+{
+  "expected_output": {
+    "canonical_record_sha256": "3cf8a6517636d42763c094c7fbcf14b2785942b6e1adc4541843335e0a82f44d",
+    "canonicalization": "SHA-256 of byte-sorted non-header SAM alignment lines, each terminated by LF",
+    "profile": "directional-k1-p0.5-mapqual-or-avgqual",
+    "records": 65536
+  },
+  "generator": {
+    "command": "generate_workload.py hotspot --families 65536 --seed 1729 --output '<OUTPUT_SAM>' --metadata '<METADATA_JSON>'",
+    "python": "3.12.3",
+    "source": "scripts/benchmark/generate_workload.py",
+    "source_sha256": "d83a74ec634d1f9549b0fa94e49318f1f76770e1cf4ee3a2c6c393d3fd34cf1a",
+    "version": "1.0.0"
+  },
+  "input": {
+    "bytes": 147718189,
+    "format": "SAM",
+    "path": "input.sam",
+    "records": 917504,
+    "reference_dictionary_sha256": "43e376761b9eee1f83af202748aefe5b4a162610442db37be3291c635a6f75f0",
+    "reference_sequences": 1,
+    "sha256": "f4dae5ac6a9b4a421194aa053c30a185d9f2583a5f1fd1d351ff7760458aa612",
+    "sort_order": "coordinate"
+  },
+  "parameters": {
+    "child_copies": 2,
+    "children_per_family": 3,
+    "families": 65536,
+    "parent_copies": 8,
+    "seed": 1729,
+    "umi_length": 12
+  },
+  "schema_version": 1,
+  "workload": "hotspot",
+  "workload_id": "hotspot__families-65536__children_per_family-3__parent_copies-8__child_copies-2__seed-1729"
+}

@@ -322,7 +322,6 @@ def scan_public_evidence(output_root: Path, repository_root: Path) -> None:
         "/" + "home" + "/",
         "/" + "Users" + "/",
     )
-    organization_name = "plasmid" + "saurus"
     exact_private_values = {
         private
         for private, replacement in PUBLIC_PATH_REPLACEMENTS
@@ -350,8 +349,6 @@ def scan_public_evidence(output_root: Path, repository_root: Path) -> None:
             findings.append(f"{relative}: private absolute path root")
         if any(value and value in text for value in exact_private_values):
             findings.append(f"{relative}: run-local absolute path")
-        if organization_name in text.lower():
-            findings.append(f"{relative}: organization-specific branding")
         if relative.split("/", 1)[0] not in {"harness", "sources"}:
             for token in identity_tokens:
                 if re.search(
@@ -374,7 +371,6 @@ def scan_public_evidence(output_root: Path, repository_root: Path) -> None:
                 "rules": [
                     "no private absolute path roots",
                     "no run-local absolute paths",
-                    "no organization-specific branding",
                     "no local user or host tokens in generated textual evidence",
                 ],
             },

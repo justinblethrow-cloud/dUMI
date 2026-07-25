@@ -10,8 +10,10 @@ deck and contains no organization-specific branding.
 - Takeaway sentence: at most 25 words.
 - Supporting text: at most three bullets, each at most 12 words.
 - Visuals: one principal diagram, table, or chart per slide.
-- Quantitative claims: use only accepted values from
+- Performance claims: use only accepted values from
   [`benchmark-summary.csv`](benchmark-summary.csv).
+- Allocation observations: use only the retained
+  [post-change profile](../benchmarks/2026-07-25/profile/allocation-aggregate.json).
 - Source note: one compact line linking to the canonical repository evidence.
 
 ## 1. Why revisit UMICollapse?
@@ -71,12 +73,15 @@ Supporting points:
 
 - Direct default-UMI scan and encoding; lazy average quality.
 - Lazy single-UMI accumulation and streaming singleton bypass.
-- Packed n-gram keys with an object-key fallback.
+- Post-change samples were dominated by decoding and representation.
 
 Visual: a three-row “upstream mechanism → fork mechanism → fallback” table.
 
 Evidence: parser, directional, and `NgramBKTree` rows in
-[`OPTIMIZATIONS.md`](../OPTIMIZATIONS.md).
+[`OPTIMIZATIONS.md`](../OPTIMIZATIONS.md), plus the retained
+[post-change allocation profile](../benchmarks/2026-07-25/profile/allocation-aggregate.json).
+The profile is a diagnostic check of the resulting singleton path; it is not a
+before/after profiler result and did not identify the original opportunities.
 
 ## 5. Guarded streaming
 
@@ -102,35 +107,42 @@ tests both success and failure semantics.
 
 Supporting points:
 
-- Differential `NgramBKTree` comparison against `Naive`.
-- Streaming versus legacy across strategy combinations.
-- Invalid order, clipping, CLI, paired, and output-preservation cases.
+- Differential structures and streaming/legacy record equivalence.
+- Failure safety, CLI, paired, and deterministic-tie regressions.
+- Three post-change allocation runs with positive controls.
 
-Visual: a compact matrix with rows “core,” “streaming,” “failure safety,” and
-“platform.”
+Visual: a compact matrix with rows “core,” “streaming,” “failure safety,”
+“allocation diagnostic,” and “platform.”
 
 Evidence: [`VALIDATION.md`](../../VALIDATION.md),
 [`TestNgramBKTreeRegression.java`](../../src/test/TestNgramBKTreeRegression.java),
-and [`test-streaming.sh`](../../test/test-streaming.sh).
+[`test-streaming.sh`](../../test/test-streaming.sh), and the
+[profile evidence](../benchmarks/2026-07-25/profile/profile-correctness.json).
 
 ## 7. Measured comparison with upstream
 
-**Takeaway:** Present the accepted upstream, non-streaming fork, and streaming
-fork measurements without combining unlike runtime settings.
+**Takeaway:** Across four synthetic single-end workloads, `auto` delivered
+1.30x–2.75x raw speedups; downstream-ready gains were 1.27x–1.96x.
 
 Supporting points:
 
-- Same JDK, JVM options, dependencies, input, and host.
-- Report repeated elapsed-time and peak-RSS summaries.
-- Require record-multiset equivalence for every candidate.
+- Peak RSS fell 15.83%–83.46% versus canonical upstream.
+- Sorting and indexing reduce every streaming speedup.
+- Tiny paired regression retained; large gain traces to PR #32.
 
-Visual: two aligned small-multiple bar charts, one for elapsed time and one for
-maximum RSS. Do not use a dual axis.
+Visual: one compound figure with matched raw speedup, raw-plus-ready speedup,
+and peak-RSS reduction for the four single-end workloads. Add a small paired
+inset showing both the 10-reference regression check and the 1,000-reference
+gain beside the PR #32 intermediate. Label every workload as fixed-seed
+synthetic; disclose that the unique-pair fixtures test traversal,
+reference-transition scaling, and preservation rather than duplicate collapse
+or representative selection. Do not use a dual axis.
 
 Evidence: [`PERFORMANCE.md`](../PERFORMANCE.md) and
-[`benchmark-summary.csv`](benchmark-summary.csv).
-
-Do not insert a numeric headline until the benchmark package is final.
+[`benchmark-summary.csv`](benchmark-summary.csv), backed by the
+[clean evidence package](../benchmarks/2026-07-25/README.md). The source note
+must name canonical `efeab35`, dUMI `2995329`, seven matched repetitions, and
+`aeacd82` from unmerged PR #32 for the paired attribution.
 
 ## 8. Resulting architecture and applicability
 
@@ -156,6 +168,9 @@ Use:
 - representative read;
 - coordinate-window-bounded working set;
 - measured on the specified workload;
+- fixed-seed synthetic scaling measurement;
+- raw-plus-ready includes downstream sorting and indexing;
+- post-change allocation sampling observed;
 - code-path analysis identified;
 - canonical upstream `efeab35`.
 
@@ -165,5 +180,7 @@ Avoid:
 - constant or bounded memory;
 - production-wide performance;
 - orders-of-magnitude improvement over UMICollapse;
-- profiling showed, unless a retained profile is cited;
+- profiling discovered the original opportunities;
+- a zero allocation sample proves a site never executes;
+- paired performance gain without PR #32 attribution;
 - upstream v1.1.0 for `aeacd82`.

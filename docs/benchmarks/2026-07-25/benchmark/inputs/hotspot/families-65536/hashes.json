@@ -1,0 +1,23 @@
+{
+  "bam": {
+    "bytes": 7058343,
+    "path": "inputs/hotspot/families-65536/input.bam",
+    "sha256": "c908b92b7207bad7603f8cee44aca166739430e31ec604a9ad9149a803c0c412"
+  },
+  "expected_output_records": 65536,
+  "expected_output_semantic_sha256": "3cf8a6517636d42763c094c7fbcf14b2785942b6e1adc4541843335e0a82f44d",
+  "expected_reference_dictionary_sha256": "43e376761b9eee1f83af202748aefe5b4a162610442db37be3291c635a6f75f0",
+  "expected_reference_sequences": 1,
+  "generator_command": "'<PYTHON>' '<EVIDENCE_DIR>/harness/generate_workload.py' hotspot --families 65536 --seed 1729 --output '<EVIDENCE_DIR>/inputs/hotspot/families-65536/input.sam' --metadata '<EVIDENCE_DIR>/inputs/hotspot/families-65536/metadata.json'",
+  "index": {
+    "bytes": 96,
+    "path": "inputs/hotspot/families-65536/input.bam.bai",
+    "sha256": "b339b69a477d847fead20baffa4a9abfa21733002d8f596912e341a5498a0491"
+  },
+  "input_records": 917504,
+  "sam": {
+    "bytes": 147718189,
+    "path": "inputs/hotspot/families-65536/input.sam",
+    "sha256": "f4dae5ac6a9b4a421194aa053c30a185d9f2583a5f1fd1d351ff7760458aa612"
+  }
+}

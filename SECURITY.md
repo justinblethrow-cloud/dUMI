@@ -2,18 +2,24 @@
 
 ## Supported versions
 
-Until dUMI publishes a versioned release, the current default branch is the
-only line considered for best-effort security corrections. Historical
-UMICollapse tags and development snapshots are retained for provenance and are
-not separate dUMI support commitments.
+| Version | Supported |
+| --- | --- |
+| `main` | Yes, as the current development line |
+| `2.0.x` | Yes |
+| Earlier dUMI or UMICollapse versions | No |
+
+Security fixes normally land on `main` and are included in a supported
+`2.0.x` release when applicable. Historical UMICollapse tags and development
+snapshots are retained for provenance, not as separate support commitments.
 
 ## Reporting a vulnerability
 
 Do not open a public issue containing exploit details, sensitive inputs,
 credentials, or personally identifying sequencing data.
 
-If GitHub displays a **Report a vulnerability** option on the repository's
-Security page, use it to submit a private report. Include:
+Use
+[GitHub's private vulnerability report form](https://github.com/justinblethrow-cloud/dUMI/security/advisories/new)
+to submit a report. Include:
 
 - the affected commit and execution mode;
 - a minimal reproduction that does not contain sensitive data;
@@ -21,9 +27,9 @@ Security page, use it to submit a private report. Include:
 - the potential confidentiality, integrity, or availability impact;
 - any known workaround.
 
-If private vulnerability reporting is unavailable, open a public issue with no
-technical details asking the maintainer to establish a private channel. Do not
-attach the reproduction until that channel exists.
+If you cannot access the private form, open a public issue containing no
+technical details and ask the maintainer to establish a private channel. Do
+not attach the reproduction until that channel exists.
 
 Reports will be acknowledged and assessed on a best-effort basis. A fix,
 release, or disclosure timeline depends on reproducibility, severity, and
@@ -46,5 +52,5 @@ Security-relevant examples include:
 - dependency or build-artifact substitution;
 - exposure of sensitive read data in logs or fixtures.
 
-Ordinary correctness bugs and performance regressions can use the regular
-issue tracker once it is enabled.
+Ordinary correctness bugs and performance regressions can use
+[GitHub Issues](https://github.com/justinblethrow-cloud/dUMI/issues).

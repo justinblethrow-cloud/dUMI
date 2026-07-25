@@ -1,0 +1,33 @@
+{
+  "expected_output": {
+    "canonical_record_sha256": "0f70b3bf63ac7ff0498631c0991afb88d8fa6f629fdffbf2ae87cd46fb4f6ea2",
+    "canonicalization": "SHA-256 of byte-sorted non-header SAM alignment lines, each terminated by LF",
+    "profile": "directional-k1-p0.5-mapqual-or-avgqual",
+    "records": 100000
+  },
+  "generator": {
+    "command": "generate_workload.py sparse --records 100000 --seed 1729 --output '<OUTPUT_SAM>' --metadata '<METADATA_JSON>'",
+    "python": "3.12.3",
+    "source": "scripts/benchmark/generate_workload.py",
+    "source_sha256": "d83a74ec634d1f9549b0fa94e49318f1f76770e1cf4ee3a2c6c393d3fd34cf1a",
+    "version": "1.0.0"
+  },
+  "input": {
+    "bytes": 15589347,
+    "format": "SAM",
+    "path": "input.sam",
+    "records": 100000,
+    "reference_dictionary_sha256": "e829495d9e64554ff2ba688e7b092c8395130d6e95239bb3b25c38f9c3531258",
+    "reference_sequences": 1,
+    "sha256": "3dc6b3bd01b1daf87057b06ed3aea1e185d383ab3472b857d796f392a9917e7d",
+    "sort_order": "coordinate"
+  },
+  "parameters": {
+    "records": 100000,
+    "seed": 1729,
+    "umi_length": 12
+  },
+  "schema_version": 1,
+  "workload": "sparse",
+  "workload_id": "sparse__records-100000__seed-1729"
+}

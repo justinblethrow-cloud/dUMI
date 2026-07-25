@@ -1,0 +1,538 @@
+{
+  "aggregate": {
+    "event_count": 2504,
+    "sample_weight_bytes": 2005438624,
+    "sentinels": [
+      {
+        "definition": "Allocated class or sampled stack references Ngram data setup, Directional.apply, ClusterTracker, or DeduplicateSAM.instantiateData.",
+        "event_count": 0,
+        "id": "general_clustering_setup",
+        "kind": "expected_absent_on_sparse_singleton_path",
+        "per_run_event_count": [
+          0,
+          0,
+          0
+        ],
+        "per_run_sample_weight_bytes": [
+          0,
+          0,
+          0
+        ],
+        "sample_weight_bytes": 0
+      },
+      {
+        "definition": "A HashMap or ReadFreq allocation is sampled under DeduplicateSAM.addStreamingRead.",
+        "event_count": 0,
+        "id": "singleton_umi_map_promotion",
+        "kind": "expected_absent_on_sparse_singleton_path",
+        "per_run_event_count": [
+          0,
+          0,
+          0
+        ],
+        "per_run_sample_weight_bytes": [
+          0,
+          0,
+          0
+        ],
+        "sample_weight_bytes": 0
+      },
+      {
+        "definition": "DeduplicateSAM.instantiateData, or a reflection frame beneath DeduplicateSAM.flushStreamingGroup, is sampled.",
+        "event_count": 0,
+        "id": "reflective_data_instantiation",
+        "kind": "expected_absent_on_sparse_singleton_path",
+        "per_run_event_count": [
+          0,
+          0,
+          0
+        ],
+        "per_run_sample_weight_bytes": [
+          0,
+          0,
+          0
+        ],
+        "sample_weight_bytes": 0
+      },
+      {
+        "definition": "A StreamingAlignReads allocation or constructor frame is sampled.",
+        "event_count": 188,
+        "id": "streaming_group_positive_control",
+        "kind": "expected_present",
+        "per_run_event_count": [
+          52,
+          65,
+          71
+        ],
+        "per_run_sample_weight_bytes": [
+          41670800,
+          46722184,
+          52845552
+        ],
+        "sample_weight_bytes": 141238536
+      },
+      {
+        "definition": "DeduplicateSAM.singleEndAlignment is sampled.",
+        "event_count": 752,
+        "id": "alignment_key_positive_control",
+        "kind": "expected_present",
+        "per_run_event_count": [
+          233,
+          262,
+          257
+        ],
+        "per_run_sample_weight_bytes": [
+          202543920,
+          211558376,
+          220655024
+        ],
+        "sample_weight_bytes": 634757320
+      }
+    ],
+    "top_allocated_classes": [
+      {
+        "event_count": 630,
+        "label": "[B",
+        "sample_weight_bytes": 495358040,
+        "sample_weight_share_pct": 24.701
+      },
+      {
+        "event_count": 228,
+        "label": "[Ljava.lang.Object;",
+        "sample_weight_bytes": 197544216,
+        "sample_weight_share_pct": 9.85
+      },
+      {
+        "event_count": 211,
+        "label": "java.util.HashMap$Node",
+        "sample_weight_bytes": 187694376,
+        "sample_weight_share_pct": 9.359
+      },
+      {
+        "event_count": 173,
+        "label": "java.util.ArrayList",
+        "sample_weight_bytes": 171415408,
+        "sample_weight_share_pct": 8.548
+      },
+      {
+        "event_count": 253,
+        "label": "htsjdk.samtools.BAMRecord",
+        "sample_weight_bytes": 164904488,
+        "sample_weight_share_pct": 8.223
+      },
+      {
+        "event_count": 168,
+        "label": "umicollapse.util.BitSet",
+        "sample_weight_bytes": 152183720,
+        "sample_weight_share_pct": 7.589
+      },
+      {
+        "event_count": 188,
+        "label": "umicollapse.main.DeduplicateSAM$StreamingAlignReads",
+        "sample_weight_bytes": 141238536,
+        "sample_weight_share_pct": 7.043
+      },
+      {
+        "event_count": 140,
+        "label": "umicollapse.main.DeduplicateSAM$Alignment",
+        "sample_weight_bytes": 122323032,
+        "sample_weight_share_pct": 6.1
+      },
+      {
+        "event_count": 133,
+        "label": "umicollapse.util.SAMRead",
+        "sample_weight_bytes": 119802616,
+        "sample_weight_share_pct": 5.974
+      },
+      {
+        "event_count": 134,
+        "label": "java.util.Collections$UnmodifiableRandomAccessList",
+        "sample_weight_bytes": 106596264,
+        "sample_weight_share_pct": 5.315
+      },
+      {
+        "event_count": 93,
+        "label": "java.lang.String",
+        "sample_weight_bytes": 74222216,
+        "sample_weight_share_pct": 3.701
+      },
+      {
+        "event_count": 50,
+        "label": "[J",
+        "sample_weight_bytes": 29482312,
+        "sample_weight_share_pct": 1.47
+      },
+      {
+        "event_count": 28,
+        "label": "htsjdk.samtools.Cigar",
+        "sample_weight_bytes": 16174768,
+        "sample_weight_share_pct": 0.807
+      },
+      {
+        "event_count": 30,
+        "label": "htsjdk.samtools.CigarElement",
+        "sample_weight_bytes": 13293544,
+        "sample_weight_share_pct": 0.663
+      },
+      {
+        "event_count": 26,
+        "label": "java.util.ArrayList$Itr",
+        "sample_weight_bytes": 6651144,
+        "sample_weight_share_pct": 0.332
+      },
+      {
+        "event_count": 7,
+        "label": "java.nio.HeapByteBuffer",
+        "sample_weight_bytes": 2696016,
+        "sample_weight_share_pct": 0.134
+      },
+      {
+        "event_count": 5,
+        "label": "java.util.Collections$UnmodifiableCollection$1",
+        "sample_weight_bytes": 1804976,
+        "sample_weight_share_pct": 0.09
+      },
+      {
+        "event_count": 2,
+        "label": "[Ljava.lang.invoke.LambdaForm$Name;",
+        "sample_weight_bytes": 927744,
+        "sample_weight_share_pct": 0.046
+      },
+      {
+        "event_count": 1,
+        "label": "htsjdk.samtools.util.BlockCompressedInputStream$DecompressedBlock",
+        "sample_weight_bytes": 660296,
+        "sample_weight_share_pct": 0.033
+      },
+      {
+        "event_count": 1,
+        "label": "jdk.internal.org.objectweb.asm.SymbolTable$Entry",
+        "sample_weight_bytes": 462320,
+        "sample_weight_share_pct": 0.023
+      }
+    ],
+    "top_allocation_sites": [
+      {
+        "event_count": 376,
+        "label": "htsjdk.samtools.BAMRecordCodec.decode",
+        "sample_weight_bytes": 231273032,
+        "sample_weight_share_pct": 11.532
+      },
+      {
+        "event_count": 227,
+        "label": "java.util.Arrays.copyOfRangeByte",
+        "sample_weight_bytes": 214911320,
+        "sample_weight_share_pct": 10.716
+      },
+      {
+        "event_count": 226,
+        "label": "java.util.ArrayList.grow",
+        "sample_weight_bytes": 196870784,
+        "sample_weight_share_pct": 9.817
+      },
+      {
+        "event_count": 211,
+        "label": "java.util.HashMap.newNode",
+        "sample_weight_bytes": 187694376,
+        "sample_weight_share_pct": 9.359
+      },
+      {
+        "event_count": 173,
+        "label": "htsjdk.samtools.Cigar.<init>",
+        "sample_weight_bytes": 171415408,
+        "sample_weight_share_pct": 8.548
+      },
+      {
+        "event_count": 253,
+        "label": "htsjdk.samtools.DefaultSAMRecordFactory.createBAMRecord",
+        "sample_weight_bytes": 164904488,
+        "sample_weight_share_pct": 8.223
+      },
+      {
+        "event_count": 168,
+        "label": "umicollapse.util.Utils.toBitSet",
+        "sample_weight_bytes": 152183720,
+        "sample_weight_share_pct": 7.589
+      },
+      {
+        "event_count": 188,
+        "label": "umicollapse.main.DeduplicateSAM.deduplicateAndMergeSingleEndStreaming",
+        "sample_weight_bytes": 141238536,
+        "sample_weight_share_pct": 7.043
+      },
+      {
+        "event_count": 140,
+        "label": "umicollapse.main.DeduplicateSAM.singleEndAlignment",
+        "sample_weight_bytes": 122323032,
+        "sample_weight_share_pct": 6.1
+      },
+      {
+        "event_count": 133,
+        "label": "umicollapse.main.DeduplicateSAM.addStreamingRead",
+        "sample_weight_bytes": 119802616,
+        "sample_weight_share_pct": 5.974
+      },
+      {
+        "event_count": 134,
+        "label": "java.util.Collections.unmodifiableList",
+        "sample_weight_bytes": 106596264,
+        "sample_weight_share_pct": 5.315
+      },
+      {
+        "event_count": 84,
+        "label": "htsjdk.samtools.util.StringUtil.bytesToString",
+        "sample_weight_bytes": 74211368,
+        "sample_weight_share_pct": 3.701
+      },
+      {
+        "event_count": 21,
+        "label": "java.util.Arrays.copyOf",
+        "sample_weight_bytes": 46374688,
+        "sample_weight_share_pct": 2.312
+      },
+      {
+        "event_count": 50,
+        "label": "umicollapse.util.BitSet.<init>",
+        "sample_weight_bytes": 29482312,
+        "sample_weight_share_pct": 1.47
+      },
+      {
+        "event_count": 28,
+        "label": "htsjdk.samtools.BinaryCigarCodec.decode",
+        "sample_weight_bytes": 16174768,
+        "sample_weight_share_pct": 0.807
+      },
+      {
+        "event_count": 30,
+        "label": "htsjdk.samtools.BinaryCigarCodec.binaryCigarToCigarElement",
+        "sample_weight_bytes": 13293544,
+        "sample_weight_share_pct": 0.663
+      },
+      {
+        "event_count": 26,
+        "label": "java.util.ArrayList.iterator",
+        "sample_weight_bytes": 6651144,
+        "sample_weight_share_pct": 0.332
+      },
+      {
+        "event_count": 7,
+        "label": "java.nio.ByteBuffer.wrap",
+        "sample_weight_bytes": 2696016,
+        "sample_weight_share_pct": 0.134
+      },
+      {
+        "event_count": 5,
+        "label": "java.util.Collections$UnmodifiableCollection.iterator",
+        "sample_weight_bytes": 1804976,
+        "sample_weight_share_pct": 0.09
+      },
+      {
+        "event_count": 3,
+        "label": "java.io.BufferedInputStream.getBufIfOpen",
+        "sample_weight_bytes": 1620960,
+        "sample_weight_share_pct": 0.081
+      }
+    ],
+    "top_dumi_ancestor_sites": [
+      {
+        "event_count": 1037,
+        "label": "umicollapse.main.DeduplicateSAM.deduplicateAndMergeSingleEndStreaming",
+        "sample_weight_bytes": 729564296,
+        "sample_weight_share_pct": 36.379
+      },
+      {
+        "event_count": 752,
+        "label": "umicollapse.main.DeduplicateSAM.singleEndAlignment",
+        "sample_weight_bytes": 634757320,
+        "sample_weight_share_pct": 31.652
+      },
+      {
+        "event_count": 308,
+        "label": "umicollapse.util.SAMRead.getUMI",
+        "sample_weight_bytes": 268965344,
+        "sample_weight_share_pct": 13.412
+      },
+      {
+        "event_count": 168,
+        "label": "umicollapse.util.Utils.toBitSet",
+        "sample_weight_bytes": 152183720,
+        "sample_weight_share_pct": 7.589
+      },
+      {
+        "event_count": 133,
+        "label": "umicollapse.main.DeduplicateSAM.addStreamingRead",
+        "sample_weight_bytes": 119802616,
+        "sample_weight_share_pct": 5.974
+      },
+      {
+        "event_count": 4,
+        "label": "umicollapse.main.Main.<clinit>",
+        "sample_weight_bytes": 55876424,
+        "sample_weight_share_pct": 2.786
+      },
+      {
+        "event_count": 50,
+        "label": "umicollapse.util.BitSet.<init>",
+        "sample_weight_bytes": 29482312,
+        "sample_weight_share_pct": 1.47
+      },
+      {
+        "event_count": 15,
+        "label": "umicollapse.main.DeduplicateSAM.deduplicateAndMergeCore",
+        "sample_weight_bytes": 7924088,
+        "sample_weight_share_pct": 0.395
+      },
+      {
+        "event_count": 8,
+        "label": "umicollapse.main.DeduplicateSAM$Writer.write",
+        "sample_weight_bytes": 2799808,
+        "sample_weight_share_pct": 0.14
+      },
+      {
+        "event_count": 5,
+        "label": "umicollapse.main.DeduplicateSAM$Writer.<init>",
+        "sample_weight_bytes": 2576016,
+        "sample_weight_share_pct": 0.128
+      },
+      {
+        "event_count": 3,
+        "label": "umicollapse.main.Main.createTemporaryOutput",
+        "sample_weight_bytes": 1390064,
+        "sample_weight_share_pct": 0.069
+      },
+      {
+        "event_count": 21,
+        "label": "no_dumi_frame",
+        "sample_weight_bytes": 116616,
+        "sample_weight_share_pct": 0.006
+      }
+    ]
+  },
+  "aggregator": {
+    "source": "scripts/profile/aggregate_jfr.py",
+    "source_sha256": "9e873c7a4759928ade8be250fb63f7465718b73631a8935bd0dc996b0005219d",
+    "version": "1.0.0"
+  },
+  "configuration": {
+    "event": "jdk.ObjectAllocationSample",
+    "jfr_tool_version": "21.0.11",
+    "source": "scripts/profile/allocation-only.jfc",
+    "source_sha256": "88c6610a435fae3922360c59f965cd8fd6e752ce9cc17960d3a96835c35f97be",
+    "stack_depth": 128,
+    "throttle": "1000/s"
+  },
+  "interpretation": "Aggregated JFR sample weights estimate allocation pressure; they are not exact allocated bytes, retained heap, or object counts.",
+  "limits": {
+    "maximum_existing_output_bytes": 1048576,
+    "maximum_label_characters": 512,
+    "maximum_recording_bytes": 16777216,
+    "maximum_recordings": 32,
+    "top_entries_per_dimension": 20
+  },
+  "runs": [
+    {
+      "event_count": 838,
+      "recording_bytes": 148200,
+      "recording_sha256": "f1b6715014e4a8e94dd7376d87332e1886319c7071ae731741671c3dde38e7c1",
+      "run": 1,
+      "sample_weight_bytes": 668493624,
+      "sentinels": [
+        {
+          "event_count": 0,
+          "id": "general_clustering_setup",
+          "sample_weight_bytes": 0
+        },
+        {
+          "event_count": 0,
+          "id": "singleton_umi_map_promotion",
+          "sample_weight_bytes": 0
+        },
+        {
+          "event_count": 0,
+          "id": "reflective_data_instantiation",
+          "sample_weight_bytes": 0
+        },
+        {
+          "event_count": 52,
+          "id": "streaming_group_positive_control",
+          "sample_weight_bytes": 41670800
+        },
+        {
+          "event_count": 233,
+          "id": "alignment_key_positive_control",
+          "sample_weight_bytes": 202543920
+        }
+      ]
+    },
+    {
+      "event_count": 835,
+      "recording_bytes": 145777,
+      "recording_sha256": "b89d3e4037ee716e68709566cd5528ab59f06b71077cc598215757b78caaac96",
+      "run": 2,
+      "sample_weight_bytes": 668331608,
+      "sentinels": [
+        {
+          "event_count": 0,
+          "id": "general_clustering_setup",
+          "sample_weight_bytes": 0
+        },
+        {
+          "event_count": 0,
+          "id": "singleton_umi_map_promotion",
+          "sample_weight_bytes": 0
+        },
+        {
+          "event_count": 0,
+          "id": "reflective_data_instantiation",
+          "sample_weight_bytes": 0
+        },
+        {
+          "event_count": 65,
+          "id": "streaming_group_positive_control",
+          "sample_weight_bytes": 46722184
+        },
+        {
+          "event_count": 262,
+          "id": "alignment_key_positive_control",
+          "sample_weight_bytes": 211558376
+        }
+      ]
+    },
+    {
+      "event_count": 831,
+      "recording_bytes": 148183,
+      "recording_sha256": "e4d2605904095ed3396e619958ca0da724659896e9c323dd599bf3d59d00f0c4",
+      "run": 3,
+      "sample_weight_bytes": 668613392,
+      "sentinels": [
+        {
+          "event_count": 0,
+          "id": "general_clustering_setup",
+          "sample_weight_bytes": 0
+        },
+        {
+          "event_count": 0,
+          "id": "singleton_umi_map_promotion",
+          "sample_weight_bytes": 0
+        },
+        {
+          "event_count": 0,
+          "id": "reflective_data_instantiation",
+          "sample_weight_bytes": 0
+        },
+        {
+          "event_count": 71,
+          "id": "streaming_group_positive_control",
+          "sample_weight_bytes": 52845552
+        },
+        {
+          "event_count": 257,
+          "id": "alignment_key_positive_control",
+          "sample_weight_bytes": 220655024
+        }
+      ]
+    }
+  ],
+  "schema": "dumi-allocation-profile",
+  "schema_version": 1
+}

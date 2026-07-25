@@ -53,8 +53,9 @@ Add four numbered callouts without changing the underlying flow:
 4. object-based n-gram interval keys.
 
 Use the heading “Opportunities identified by code-path analysis.” Do not use
-flame icons or a “profiling” label because no retained profile supports that
-claim.
+flame icons or label the opportunities as profiler discoveries. The retained
+post-change allocation profile may appear as a separate validation note, but
+it is not a before/after profiler result.
 
 ## Figure C: Shared-core changes
 
@@ -106,8 +107,9 @@ Rows:
 - optimized parser and singleton semantics;
 - `NgramBKTree` differential behavior;
 - streaming/legacy record equivalence;
-- SAM/BAM and indexed-BAM, unindexed-BAM, and SAM paired behavior;
+- single-end SAM/BAM and paired indexed-BAM, unindexed-BAM, and SAM behavior;
 - sort metadata and destination preservation;
+- post-change allocation sentinels and positive controls;
 - Java and operating-system matrix.
 
 Columns:
@@ -122,26 +124,79 @@ Use checkmarks only for gates actually recorded in
 
 ## Figure F: Performance comparison
 
-Source data:
-[`benchmark-summary.csv`](benchmark-summary.csv).
+Source data: [`benchmark-summary.csv`](benchmark-summary.csv), interpreted in
+[`PERFORMANCE.md`](../PERFORMANCE.md) and backed by the
+[clean evidence package](../benchmarks/2026-07-25/README.md).
 
-Use two small multiples:
+Label the entire figure “Fixed-seed synthetic scaling measurements.” Use three
+aligned small multiples for the four single-end workloads:
 
-- median elapsed seconds;
-- median maximum RSS in KiB or MiB.
+- matched raw speedup versus canonical upstream;
+- matched raw-plus-ready speedup versus canonical upstream;
+- matched raw peak-RSS reduction versus canonical upstream.
 
 Within each panel, use the same candidate order:
 
-1. canonical upstream;
-2. dUMI streaming `off`;
-3. dUMI streaming `on` or default `auto` when eligibility is demonstrated.
+1. dUMI streaming `off`;
+2. dUMI streaming `on`;
+3. dUMI default `auto`.
 
-Show the measured spread using whiskers when repeated measurements are
-available. Put exact commit identifiers and repetition count in a source note.
-Do not mix default upstream fixed-heap launcher results with code-isolated
-equal-JVM results in the same comparison.
+Use a reference line at 1.0x for speedup panels and 0% for the RSS panel. Show
+the matched seven-repetition range with whiskers. The raw-plus-ready panel must
+state that streaming cells include `samtools sort` plus indexing, while
+coordinate-sorted upstream and `off` cells require indexing only.
 
-## Figure G: Resulting architecture
+Add a compact paired attribution inset with two workload groups:
+
+- 10 references / 100 records: show the PR #32 intermediate and dUMI values,
+  and label the dUMI result a tiny fixed-cost regression check;
+- 1,000 references / 10,000 records: show that the large gain is already
+  present at `aeacd82` before the later dUMI changes.
+
+State that both paired fixtures contain unique pairs and therefore measure
+traversal/reference-transition scaling and preservation, not paired duplicate
+collapse or representative selection.
+
+Put canonical `efeab35`, dUMI `2995329`, PR #32 intermediate `aeacd82`, the
+common runtime, and seven matched repetitions in the source note. Do not mix
+launcher-default results with the code-isolated equal-JVM comparison.
+
+## Figure G: Post-change allocation diagnostic
+
+Source data:
+[`allocation-aggregate.json`](../benchmarks/2026-07-25/profile/allocation-aggregate.json),
+[`profile-correctness.json`](../benchmarks/2026-07-25/profile/profile-correctness.json),
+and
+[`profile-receipt.json`](../benchmarks/2026-07-25/profile/profile-receipt.json).
+
+Format: a compact sentinel table beside a horizontal ranking of the leading
+sampled allocation sites.
+
+Required context:
+
+- three Java 21 runs of the one-million-record synthetic sparse workload;
+- forced streaming, clean frozen commit `2995329`;
+- exact record and reference-dictionary checks passed in every run;
+- all three expected-absent singleton-setup sentinels were zero;
+- both positive controls were sampled in every run.
+
+Label bar values “JFR sample-weight share,” not allocated bytes or retained
+heap. Group HTSJDK decoding, byte copying, CIGAR/list construction, and
+BAM-record creation distinctly from dUMI UMI, group, alignment, and read
+objects.
+
+Caption:
+
+> Post-change sampling observed no singleton-setup sentinel events on this
+> synthetic workload; remaining sampled pressure was dominated by decoding and
+> representation work.
+
+Add a footnote that zero sampled weight does not prove a site can never
+allocate. Do not show the undistributed development profile, calculate a
+before/after reduction, or imply that profiling discovered the original
+opportunities.
+
+## Figure H: Resulting architecture
 
 Source:
 [`resulting-architecture.mmd`](../diagrams/resulting-architecture.mmd).

@@ -1,0 +1,34 @@
+{
+  "expected_output": {
+    "canonical_record_sha256": "624aeb2d2500f232627a64f5d1e7c131ab8774de141e2cc1aa28bc58f5c036fc",
+    "canonicalization": "SHA-256 of byte-sorted non-header SAM alignment lines, each terminated by LF",
+    "profile": "directional-k1-p0.5-mapqual-or-avgqual",
+    "records": 100
+  },
+  "generator": {
+    "command": "generate_workload.py paired --references 10 --pairs-per-reference 5 --seed 1729 --output '<OUTPUT_SAM>' --metadata '<METADATA_JSON>'",
+    "python": "3.12.3",
+    "source": "scripts/benchmark/generate_workload.py",
+    "source_sha256": "d83a74ec634d1f9549b0fa94e49318f1f76770e1cf4ee3a2c6c393d3fd34cf1a",
+    "version": "1.0.0"
+  },
+  "input": {
+    "bytes": 16645,
+    "format": "SAM",
+    "path": "input.sam",
+    "records": 100,
+    "reference_dictionary_sha256": "f6217beb67a6285781b26fde120aa3a094be1b9152fdd17b2f71ddf81233ed6c",
+    "reference_sequences": 10,
+    "sha256": "6f623a3796079795e22048763e4acffca8029367365a185e41a11c55efa62ce2",
+    "sort_order": "coordinate"
+  },
+  "parameters": {
+    "pairs_per_reference": 5,
+    "references": 10,
+    "seed": 1729,
+    "umi_length": 12
+  },
+  "schema_version": 1,
+  "workload": "paired",
+  "workload_id": "paired__references-10__pairs_per_reference-5__seed-1729"
+}

@@ -1,0 +1,23 @@
+{
+  "bam": {
+    "bytes": 1675,
+    "path": "inputs/paired/references-10/input.bam",
+    "sha256": "f46cbee3b054db041c9999556cb93a235335f772f659994621fb337dfc46e985"
+  },
+  "expected_output_records": 100,
+  "expected_output_semantic_sha256": "624aeb2d2500f232627a64f5d1e7c131ab8774de141e2cc1aa28bc58f5c036fc",
+  "expected_reference_dictionary_sha256": "f6217beb67a6285781b26fde120aa3a094be1b9152fdd17b2f71ddf81233ed6c",
+  "expected_reference_sequences": 10,
+  "generator_command": "'<PYTHON>' '<EVIDENCE_DIR>/harness/generate_workload.py' paired --references 10 --pairs-per-reference 5 --seed 1729 --output '<EVIDENCE_DIR>/inputs/paired/references-10/input.sam' --metadata '<EVIDENCE_DIR>/inputs/paired/references-10/metadata.json'",
+  "index": {
+    "bytes": 816,
+    "path": "inputs/paired/references-10/input.bam.bai",
+    "sha256": "192fc9302b2bbd6319a09b19283eb004fd1dd1bb7e8178778c341b2ff2063fef"
+  },
+  "input_records": 100,
+  "sam": {
+    "bytes": 16645,
+    "path": "inputs/paired/references-10/input.sam",
+    "sha256": "6f623a3796079795e22048763e4acffca8029367365a185e41a11c55efa62ce2"
+  }
+}

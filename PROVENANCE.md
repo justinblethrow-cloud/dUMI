@@ -47,7 +47,9 @@ The main implementation sequence after `aeacd82` is:
 5. `f133fd8` — Java test-launcher repair;
 6. `77ea792` — reproducible build, acceptance gate, and streaming hardening;
 7. `d59df6d` — CI action-runtime maintenance;
-8. `df169d8` — cross-platform and resource-safety hardening.
+8. `df169d8` — cross-platform and resource-safety hardening;
+9. `2995329` — release-candidate correctness, resource, dependency,
+   reproducibility, benchmark, and profiling hardening.
 
 Git history is authoritative for exact file-level authorship and changes.
 

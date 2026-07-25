@@ -1,0 +1,9 @@
+{
+  "rules": [
+    "no private absolute path roots",
+    "no run-local absolute paths",
+    "no organization-specific branding",
+    "no local user or host tokens in generated textual evidence"
+  ],
+  "status": "pass"
+}

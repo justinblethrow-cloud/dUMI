@@ -1,9 +1,23 @@
 # Optimization rationale and traceability
 
 The changes in this fork began with code-path analysis of the canonical
-UMICollapse implementation. This repository does not contain a retained
-profiler recording, so the opportunities below should not be described as
-profiler findings.
+UMICollapse implementation. The repository now also retains a post-change JFR
+allocation audit for the sparse forced-streaming path:
+[`docs/benchmarks/2026-07-25/profile/allocation-aggregate.json`](benchmarks/2026-07-25/profile/allocation-aggregate.json)
+and
+[`docs/benchmarks/2026-07-25/profile/profile-correctness.json`](benchmarks/2026-07-25/profile/profile-correctness.json).
+Across all three one-million-record runs, the expected-absent sentinels for
+general clustering setup, singleton-map promotion, and reflective data
+instantiation were zero, while the streaming-group and alignment-key positive
+controls were present. Each run selected forced streaming, passed the output
+checks, and preserved record and reference-dictionary equivalence.
+
+The targeted sparse-path allocations were not observed in the retained
+post-change samples; this is not a numeric before-and-after JFR comparison or
+proof that those sites can never allocate. Remaining sampled allocation is
+dominated by HTSJDK decoding and record construction plus the core
+representations required by the current design. Substantially reducing those
+allocations would require riskier parser or representation changes.
 
 Performance measurements and correctness evidence serve different purposes.
 The tests establish behavioral compatibility and safety; benchmarks quantify
@@ -21,7 +35,7 @@ only the workloads and configurations they execute.
 | Directional clustering allocates and sorts the general structures for singleton groups | Sparse coordinate data can contain many groups that cannot require error-aware merging | Streaming caller bypass for single-UMI groups, lazy disabled tracking state, and a semantics-preserving public algorithm path | Direct algorithm calls retain data-structure state semantics; production streaming returns the same representative | Singleton algorithm and production-route regressions | Sparse-group workload in [`PERFORMANCE.md`](PERFORMANCE.md) exercises the combined path |
 | Recursive graph traversal and frequency-only ordering depend on stack depth and hash iteration | Large components can exhaust the Java stack, while equal-frequency competition can vary with map order | Explicit traversal queues and deterministic UMI tie ordering | Cluster membership is stable for a fixed record multiset; `any` remains intentionally arbitrary | Determinism and deep-component hardening tests | This is primarily correctness and robustness work unless separately benchmarked |
 | `NgramBKTree` creates object keys for every n-gram interval and performs repeated map probes | These operations cause repeated allocation and can substantially over-allocate the packed table relative to the reachable key universe | Packed 64-bit interval keys, an open-addressed map capped by the reachable n-gram key universe, and corrected pruning metadata; object-key fallback remains | `removeNear` membership and removal results must match the reference implementation | [`TestNgramBKTreeRegression.java`](../src/test/TestNgramBKTreeRegression.java) differentially compares against `Naive`, including packed-key boundaries | Dense-UMI workload in [`PERFORMANCE.md`](PERFORMANCE.md) exercises the combined path; no standalone data-structure speedup is claimed unless explicitly reported there |
-| Paired output reopens the indexed BAM at reference transitions and assumes query support | Index parsing/file-open work repeats, while SAM and unindexed BAM cannot satisfy indexed queries | Incorporates persistent-reader PR [#32](https://github.com/Daniel-Liu-c0deb0t/UMICollapse/pull/32), adds resource-safe closure, and uses indexed or sequential mate recovery as available | Selected reverse mates are recovered for indexed BAM, unindexed BAM, and SAM input | Paired indexed and sequential-recovery hardening cases | No paired performance result is currently claimed |
+| Paired output reopens the indexed BAM at reference transitions and assumes query support | Index parsing/file-open work repeats, while SAM and unindexed BAM cannot satisfy indexed queries | Incorporates persistent-reader PR [#32](https://github.com/Daniel-Liu-c0deb0t/UMICollapse/pull/32), adds resource-safe closure, and uses indexed or sequential mate recovery as available | Selected reverse mates are recovered for indexed BAM, unindexed BAM, and SAM input | Paired indexed and sequential-recovery hardening cases | The unique-pair traversal benchmark in [`PERFORMANCE.md`](PERFORMANCE.md) shows the large-reference gain is already essentially present in PR #32; dUMI does not claim independent origin |
 | The permissive CLI accepts unknown strategies and invalid numeric or UMI inputs until processing | Failures occur late, and short or zero-length UMIs can alias in the encoded key | Fail-fast option/range/compatibility validation, literal separators, and effective UMI-length enforcement | Invalid invocations fail before destination replacement; shorter UMIs never silently alias | CLI matrix and parser/short-UMI hardening tests | Not applicable |
 | Runtime wrapper reserves a fixed large heap and build inputs are manually managed | Default operation is less portable and source-to-artifact correspondence is difficult to verify | JVM-default heap unless overridden, locked dependency checksums, clean Java 11-targeted builds, deterministic packaging, and a complete embedded build receipt | Users can supply `UMICOLLAPSE_JAVA_OPTS`; tagged source-and-binary releases carry exact dependencies, notices, checksums, SBOM, and receipt | [`scripts/check.sh`](../scripts/check.sh), [`scripts/verify-artifact.sh`](../scripts/verify-artifact.sh), reproducibility checks, and pinned CI/release workflows | Launcher behavior must be separated from code-isolated benchmark claims |
 

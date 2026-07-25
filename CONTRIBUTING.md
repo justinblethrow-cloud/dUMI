@@ -7,7 +7,7 @@ documentation, or reproducibility are welcome.
 
 - Search existing issues and pull requests for related work.
 - Use the repository's issue tracker for reproducible bugs and design
-  proposals when it is available.
+  proposals.
 - Follow [`SECURITY.md`](SECURITY.md) for suspected vulnerabilities; do not
   disclose sensitive security details in a public issue.
 - Keep public examples and fixtures free of private, identifying, or
@@ -38,9 +38,10 @@ Run the complete acceptance gate:
 ./scripts/check.sh
 ```
 
-The gate rebuilds production and test classes, verifies the packaged artifact,
-runs data-structure tests, and exercises SAM/BAM compatibility and failure
-paths.
+The gate rebuilds production and test classes, verifies the packaged artifact
+and Java 11 bytecode target, runs unit and differential data-structure tests,
+and exercises FASTQ and SAM/BAM command-line behavior, compatibility,
+streaming, transactions, and failure paths.
 
 ## Pull-request expectations
 

@@ -1,0 +1,23 @@
+{
+  "bam": {
+    "bytes": 7238948,
+    "path": "inputs/moderate/groups-4096-families-16/input.bam",
+    "sha256": "caa43446c48f6408806377b70168cd7e990ba0872b24bc72b657d5181ef59909"
+  },
+  "expected_output_records": 65536,
+  "expected_output_semantic_sha256": "8471d526f9930e2373263bb83a678f6800fe67e60ab4ab6497f56df2c423a864",
+  "expected_reference_dictionary_sha256": "dfd74c709c02c3d1723dd2727760b7cf74a166e9ec1f671a7f41bb529aa5e430",
+  "expected_reference_sequences": 1,
+  "generator_command": "'<PYTHON>' '<EVIDENCE_DIR>/harness/generate_workload.py' moderate --groups 4096 --families-per-group 16 --seed 1729 --output '<EVIDENCE_DIR>/inputs/moderate/groups-4096-families-16/input.sam' --metadata '<EVIDENCE_DIR>/inputs/moderate/groups-4096-families-16/metadata.json'",
+  "index": {
+    "bytes": 96,
+    "path": "inputs/moderate/groups-4096-families-16/input.bam.bai",
+    "sha256": "718470e9e2a41668a0bfe32b446a7416121b81aba7cba604f8658bb7ad281b10"
+  },
+  "input_records": 917504,
+  "sam": {
+    "bytes": 152104109,
+    "path": "inputs/moderate/groups-4096-families-16/input.sam",
+    "sha256": "e4817c623e7b6efd3dc6856d380a4615bc7f020fe9d6e87c0e0648e6f7ef3ecf"
+  }
+}

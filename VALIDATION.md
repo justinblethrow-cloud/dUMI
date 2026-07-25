@@ -1,18 +1,25 @@
-# dUMI release-candidate validation record
+# dUMI v2.0.0 validation record
 
-Status: **not yet accepted** — final frozen-commit checks are pending.
+Status: **source acceptance complete; release publication not yet executed**.
 
-This document defines the evidence required to accept the current dUMI release
-candidate. It must not be described as a completed release acceptance while any
-`PENDING_...` value remains.
+This record accepts the exact production-source and measured-harness freeze
+below for v2.0.0 publication. The final tag target may add documentation,
+curated evidence, and path-neutral publication-policy cleanup that does not
+change production sources or the sealed measurements. An annotated tag cannot
+identify its own Git object or future workflow runs without changing that
+object. Exact final identities, generated artifact hashes, workflow URLs, and
+attestations therefore belong to Git, GitHub Actions, release `SHA256SUMS`,
+build receipts, and GitHub attestations rather than placeholders inside the
+tagged source.
 
 | Field | Value |
 | --- | --- |
-| Record prepared | 2026-07-25 UTC |
-| Candidate version or tag | `PENDING_RELEASE_TAG` |
-| Candidate commit | `PENDING_FINAL_COMMIT` |
+| Record finalized | 2026-07-25 UTC |
+| Release identity | `v2.0.0`; the annotated tag is created only after the publication gate below |
+| Production-source and measured-harness freeze | [`299532964a57905c835bd750563988a09af6e1df`](https://github.com/justinblethrow-cloud/dUMI/commit/299532964a57905c835bd750563988a09af6e1df) |
+| Final release commit | The `v2.0.0` tag target, descending from the freeze above; intentionally not self-identified here |
 | Canonical upstream baseline | [`efeab35f5d29dec1d496ade3f681eeb34d9c2057`](https://github.com/Daniel-Liu-c0deb0t/UMICollapse/commit/efeab35f5d29dec1d496ade3f681eeb34d9c2057) |
-| Final acceptance decision | `PENDING_FINAL_RUN` |
+| Final acceptance decision | **Accepted for publication**, subject only to the external publication gate recorded below |
 
 ## Scope
 
@@ -48,12 +55,16 @@ that commit's authorship. The `v1.1.0` label found on `aeacd82` in an
 intermediate fork is not a canonical upstream release.
 
 [`PROVENANCE.md`](PROVENANCE.md) records the development lineage and upstream
-proposals. The frozen candidate commit above, not a mutable branch name or
-working tree, is the authority for the code accepted by this record.
+proposals. Production sources from the frozen commit above, not a mutable
+branch name or working tree, are the authority for the code accepted by this
+record. The sealed benchmark retains the exact measured harness snapshot. The
+final tag target may add documentation, curated evidence, and neutral
+publication-policy cleanup; its production-source hash must remain the
+accepted value recorded below.
 
 ## Acceptance environments
 
-The final local gate is scheduled on this environment:
+The final local gates ran on this environment:
 
 | Property | Value |
 | --- | --- |
@@ -71,12 +82,20 @@ The published CI matrix is defined by
 - macOS 15 with Java 11;
 - a separate Ubuntu 24.04, Java 11 reproducible-build job.
 
-The CI workflow and its third-party actions are commit-SHA pinned. CI evidence
-is authoritative only for the frozen candidate:
+The CI workflow and its third-party actions are commit-SHA pinned. This source
+record deliberately does not invent or embed future workflow URLs. At record
+finalization the local gates were complete, while the final branch, dependency
+audit, and tag-release workflows had not yet been executed. Before publishing
+the tag:
 
-- CI run: `PENDING_CI`
-- dependency-audit run: `PENDING_CI`
-- release run: `PENDING_RELEASE`
+- the final release commit must pass the defined Linux and macOS CI matrix
+  without changing the accepted production-source hash;
+- the network dependency-audit workflow must report no active advisories; and
+- the tagged release workflow must build and verify the archive, SBOM,
+  checksums, receipt, and GitHub provenance attestation.
+
+The resulting run URLs and generated digests are external publication
+evidence maintained by GitHub and the release assets.
 
 ## Local verification gate
 
@@ -98,11 +117,11 @@ Final frozen-commit results:
 
 | Gate | Expected result | Candidate result |
 | --- | --- | --- |
-| Java 11 `./scripts/check.sh` | Exit 0; all tests pass; class major version 55 | `PENDING_FINAL_RUN` |
-| Java 21 `./scripts/check.sh` | Exit 0; all tests pass; class major version 55 | `PENDING_FINAL_RUN` |
-| `git diff --check` | Exit 0 | `PENDING_FINAL_RUN` |
-| Shell and workflow syntax checks | Exit 0 | `PENDING_FINAL_RUN` |
-| Neutral-branding scan | No organization-specific or private path references | `PENDING_FINAL_RUN` |
+| Java 11 `./scripts/check.sh` | Exit 0; all tests pass; class major version 55 | **Pass** — final line: `Full verification passed with Java 11-compatible bytecode.` |
+| Java 21 `./scripts/check.sh` | Exit 0; all tests pass; class major version 55 | **Pass** — final line: `Full verification passed with Java 11-compatible bytecode.` |
+| `git diff --check` | Exit 0 | **Pass** |
+| Shell, Python, and workflow syntax checks | Exit 0 | **Pass** — Bash syntax, Python compilation, and workflow YAML parsing succeeded |
+| Neutral-branding and path scan | No organization-specific branding or private path references | **Pass** — repository scan and benchmark privacy scan succeeded |
 
 ## Test and regression matrix
 
@@ -111,20 +130,20 @@ must pass every row below on both local acceptance JDKs.
 
 | Test surface | Evidence | Contract exercised | Candidate result |
 | --- | --- | --- | --- |
-| Encoded UMI state | [`TestBitSet.java`](src/test/TestBitSet.java) | Distance, mutation, cloning, equality, hashing, ordering, and `N` metadata | `PENDING_FINAL_RUN` |
-| Sequential structures | [`TestDataStructures.java`](src/test/TestDataStructures.java) | Reference behavior across the sequential data-structure implementations | `PENDING_FINAL_RUN` |
-| Parallel structures | [`TestParallelDataStructures.java`](src/test/TestParallelDataStructures.java) | Parallel data-structure behavior | `PENDING_FINAL_RUN` |
-| Optimized parser and core | [`TestOptimizedRegressions.java`](src/test/TestOptimizedRegressions.java) | Fast UMI parsing, lazy quality calculation, singleton semantics, and packed n-gram routing | `PENDING_FINAL_RUN` |
-| Generated-key N handling | [`TestNKeyRegressions.java`](src/test/TestNKeyRegressions.java) | `Combo`, `Trie`, and `SymmetricDelete` parity with `Naive` for `N`-containing UMIs | `PENDING_FINAL_RUN` |
-| Threshold and parallel ties | [`TestThresholdParallelRegressions.java`](src/test/TestThresholdParallelRegressions.java) | Historical float rounding, saturation, and reverse-insertion determinism for the parallel algorithms | `PENDING_FINAL_RUN` |
-| Parallel traversal scheduling | [`TestParallelTraversalScheduling.java`](src/test/TestParallelTraversalScheduling.java) | Dense-component single scheduling plus sequential/parallel representative parity | `PENDING_FINAL_RUN` |
-| Deep BK-tree traversal | [`TestBKTreeDepthRegressions.java`](src/test/TestBKTreeDepthRegressions.java) | Stack-safe deep search, removal, statistics, sequential/parallel parity, and concurrent queries | `PENDING_FINAL_RUN` |
-| Resource and bound handling | [`TestResourceAndBoundsRegressions.java`](src/test/TestResourceAndBoundsRegressions.java) | Malformed-input cleanup, repeated file-descriptor checks, auto-detected `k` parity, construction failure, and exact counter overflow | `PENDING_FINAL_RUN` |
-| Release correctness | [`TestReleaseRegressions.java`](src/test/TestReleaseRegressions.java) | Literal separators, short-UMI rejection, deterministic ties, equality contracts, argument bounds, and packed-map capacity | `PENDING_FINAL_RUN` |
-| SAM/BAM hardening | [`TestDeduplicateSAMHardening.java`](src/test/TestDeduplicateSAMHardening.java) | Selected-pair mate recovery for SAM, indexed BAM, and unindexed BAM; singleton routing; output-format fallback; and alignment-key contracts | `PENDING_FINAL_RUN` |
-| N-gram differential matrix | [`TestNgramBKTreeRegression.java`](src/test/TestNgramBKTreeRegression.java) | `NgramBKTree` and `SortNgramBKTree` versus `Naive` over 86 deterministic randomized scenarios, including packed-key boundaries at UMI lengths 255 and 256 | `PENDING_FINAL_RUN` |
-| Streaming and route integration | [`test/test-streaming.sh`](test/test-streaming.sh) | SAM/BAM parity, algorithms, merge policies, ten sequential structures, header semantics, runtime guards, fallback, legacy/two-pass/parallel parity, tagging, paired recovery, and destination preservation | `PENDING_FINAL_RUN` |
-| CLI, FASTQ, and transactions | [`test/test-cli.sh`](test/test-cli.sh) | Help/version, invalid values and combinations, same-file and hard-link rejection, literal separators, output-format rules, runtime failure cleanup, multi-read FASTQ collapse/tagging, gzip, and atomic destination replacement | `PENDING_FINAL_RUN` |
+| Encoded UMI state | [`TestBitSet.java`](src/test/TestBitSet.java) | Distance, mutation, cloning, equality, hashing, ordering, and `N` metadata | **Pass on Java 11 and Java 21** |
+| Sequential structures | [`TestDataStructures.java`](src/test/TestDataStructures.java) | Reference behavior across the sequential data-structure implementations | **Pass on Java 11 and Java 21** |
+| Parallel structures | [`TestParallelDataStructures.java`](src/test/TestParallelDataStructures.java) | Parallel data-structure behavior | **Pass on Java 11 and Java 21** |
+| Optimized parser and core | [`TestOptimizedRegressions.java`](src/test/TestOptimizedRegressions.java) | Fast UMI parsing, lazy quality calculation, singleton semantics, and packed n-gram routing | **Pass on Java 11 and Java 21** |
+| Generated-key N handling | [`TestNKeyRegressions.java`](src/test/TestNKeyRegressions.java) | `Combo`, `Trie`, and `SymmetricDelete` parity with `Naive` for `N`-containing UMIs | **Pass on Java 11 and Java 21** |
+| Threshold and parallel ties | [`TestThresholdParallelRegressions.java`](src/test/TestThresholdParallelRegressions.java) | Historical float rounding, saturation, and reverse-insertion determinism for the parallel algorithms | **Pass on Java 11 and Java 21** |
+| Parallel traversal scheduling | [`TestParallelTraversalScheduling.java`](src/test/TestParallelTraversalScheduling.java) | Dense-component single scheduling plus sequential/parallel representative parity | **Pass on Java 11 and Java 21** |
+| Deep BK-tree traversal | [`TestBKTreeDepthRegressions.java`](src/test/TestBKTreeDepthRegressions.java) | Stack-safe deep search, removal, statistics, sequential/parallel parity, and concurrent queries | **Pass on Java 11 and Java 21** |
+| Resource and bound handling | [`TestResourceAndBoundsRegressions.java`](src/test/TestResourceAndBoundsRegressions.java) | Malformed-input cleanup, repeated file-descriptor checks, auto-detected `k` parity, construction failure, and exact counter overflow | **Pass on Java 11 and Java 21** |
+| Release correctness | [`TestReleaseRegressions.java`](src/test/TestReleaseRegressions.java) | Literal separators, short-UMI rejection, deterministic ties, equality contracts, argument bounds, and packed-map capacity | **Pass on Java 11 and Java 21** |
+| SAM/BAM hardening | [`TestDeduplicateSAMHardening.java`](src/test/TestDeduplicateSAMHardening.java) | Selected-pair mate recovery for SAM, indexed BAM, and unindexed BAM; singleton routing; output-format fallback; and alignment-key contracts | **Pass on Java 11 and Java 21** |
+| N-gram differential matrix | [`TestNgramBKTreeRegression.java`](src/test/TestNgramBKTreeRegression.java) | `NgramBKTree` and `SortNgramBKTree` versus `Naive` over 86 deterministic randomized scenarios, including packed-key boundaries at UMI lengths 255 and 256 | **Pass on Java 11 and Java 21** |
+| Streaming and route integration | [`test/test-streaming.sh`](test/test-streaming.sh) | SAM/BAM parity, algorithms, merge policies, ten sequential structures, header semantics, runtime guards, fallback, legacy/two-pass/parallel parity, tagging, paired recovery, and destination preservation | **Pass on Java 11 and Java 21** |
+| CLI, FASTQ, and transactions | [`test/test-cli.sh`](test/test-cli.sh) | Help/version, invalid values and combinations, same-file and hard-link rejection, literal separators, output-format rules, runtime failure cleanup, multi-read FASTQ collapse/tagging, gzip, and atomic destination replacement | **Pass on Java 11 and Java 21** |
 
 ### Semantic-equivalence rules
 
@@ -143,7 +162,10 @@ Correctness is evaluated separately from record order:
 5. The no-flag dUMI result must match explicit `auto` mode and must select the
    expected route for each workload.
 
-Final benchmark semantic-equivalence result: `PENDING_FINAL_BENCHMARK`.
+Final benchmark semantic-equivalence result: **Pass**. All 336 predeclared
+measurements were present; all 72 correctness cells and all 54 matched
+comparisons passed, with seven successful repetitions or pairs and zero
+failures in every applicable row.
 
 ### Transactional and CLI safety
 
@@ -162,7 +184,7 @@ suite verifies, at minimum:
   rejected instead of aliasing another encoded UMI;
 - custom UMI separators are interpreted literally.
 
-Final transactional/CLI result: `PENDING_FINAL_RUN`.
+Final transactional/CLI result: **Pass on Java 11 and Java 21**.
 
 ### Paired and deterministic behavior
 
@@ -176,7 +198,7 @@ variants use stable UMI ordering and iterative component traversal. The
 `any` merge policy remains intentionally arbitrary and is not represented as
 deterministic.
 
-Final paired and determinism result: `PENDING_FINAL_RUN`.
+Final paired and determinism result: **Pass on Java 11 and Java 21**.
 
 ## Locked dependencies and advisory review
 
@@ -211,7 +233,9 @@ It queries OSV by Maven package URL, ignores withdrawn entries, fails when an
 active advisory is returned, and treats an unreachable or malformed OSV
 response as an audit error rather than a clean result.
 
-Final OSV result: `PENDING_DEPENDENCY_AUDIT`.
+Final local OSV result: **Pass on 2026-07-25 UTC**. The live query returned no
+active advisories for either locked Maven package. The publication workflow
+must repeat this network check immediately before release.
 
 An advisory query is a point-in-time check, not proof that a dependency is free
 of vulnerabilities. Optional HTSJDK features outside the exercised
@@ -244,14 +268,14 @@ and publishes only those tagged assets.
 
 | Receipt | Candidate value |
 | --- | --- |
-| Complete build-input SHA-256 | `PENDING_FINAL_RUN` |
-| Production-source SHA-256 | `PENDING_FINAL_RUN` |
-| JAR SHA-256, first build | `PENDING_FINAL_RUN` |
-| JAR SHA-256, second build | `PENDING_FINAL_RUN` |
-| Byte-for-byte JAR comparison | `PENDING_FINAL_RUN` |
-| Release archive SHA-256 | `PENDING_RELEASE` |
-| SPDX SBOM generation and structural inspection | `PENDING_RELEASE` |
-| GitHub provenance attestation | `PENDING_RELEASE` |
+| Complete build-input SHA-256 | `b5811dc7a957935c36093003523b86fc95fdffc06ff9ee1e5dde2b22c70352d3` |
+| Production-source SHA-256 | `6d5eadb3ca7c033775e3d5e5dc12abd344a2c57f4b5bf619b3829429b859a679` |
+| JAR SHA-256, first Java 11 build | `ca3da2914342d365cb3dbec065fc68743ca45a0de0032aa40e3f076ad3c1807e` |
+| JAR SHA-256, second Java 11 build | `ca3da2914342d365cb3dbec065fc68743ca45a0de0032aa40e3f076ad3c1807e` |
+| Byte-for-byte JAR comparison | **Pass** |
+| Release archive SHA-256 | Generated from the final tagged tree and recorded in release `SHA256SUMS`; intentionally not self-embedded |
+| SPDX SBOM generation and structural inspection | Required tag-workflow publication evidence; not executed before the tag exists |
+| GitHub provenance attestation | Generated and hosted by GitHub after tag publication; intentionally external to this source record |
 
 The generated `umicollapse.jar`, build directories, and release directory are
 not source-controlled release authority. The tagged source, dependency lock,
@@ -285,34 +309,39 @@ workload, runtime identity, repetition count, semantic-equivalence result, and
 raw evidence are recorded. Results are workload-specific and must not be
 generalized into a universal speed or memory claim.
 
-Final benchmark evidence location: `PENDING_FINAL_BENCHMARK`.
+Final benchmark evidence:
+[`docs/benchmarks/2026-07-25/`](docs/benchmarks/2026-07-25/). The reportable
+run used frozen dUMI commit `2995329`, runtime ID
+`04385711a6838b779a934a4d3b0ae9d2a71106e108b465895f284a1fa0aa4566`,
+the standard profile, and seven repetitions. The original full-bundle
+manifest, the primary-evidence manifest, and the curated package
+`SHA256SUMS` all verified.
 
 ## Profiling evidence
 
-Profiling is used to identify allocation opportunities; it is not substituted
-for correctness tests or end-to-end benchmarks.
+Profiling is used to examine allocation pressure; it is not substituted for
+correctness tests or end-to-end benchmarks. Earlier diagnostic recordings
+motivated the singleton bypass and lazy one-entry accumulator, but they used a
+different workload and are not reported as before/after release evidence.
 
-A pre-final diagnostic Java Flight Recorder sample used a deterministic
-300,000-record singleton-group BAM under forced streaming. The input BAM
-SHA-256 was
-`a76e369cf850c0ec131423677a87f240868a59366b1a8351bcd12b05dfa3a215`.
-`jdk.ObjectAllocationSample` weights attributed approximately 272 MiB of
-sampled allocation to the run, concentrated in general n-gram setup
-(approximately 157 MiB), directional setup (approximately 59 MiB), disabled
-cluster tracking (approximately 48 MiB), and reflective construction
-(approximately 8 MiB). These weights are statistical estimates of allocation,
-not exact retained bytes or peak RSS.
+The final public profile used frozen commit `2995329`, Java 21, three forced
+streaming runs, and the deterministic one-million-record sparse workload
+documented in [`scripts/profile/README.md`](scripts/profile/README.md). All
+three outputs passed `samtools quickcheck`, exact record-multiset and reference
+dictionary checks, selected the streaming route without fallback, and had the
+required `SO:unsorted` declaration.
 
-That diagnostic motivated a streaming singleton bypass and lazy disabled
-tracking state. It predates the frozen candidate and is therefore not a release
-acceptance result. The raw recording is not distributed as a repository
-artifact.
+The path-neutral aggregate contains 2,504 sampled allocation events. In each
+run, all three expected-absent singleton-path sentinels had zero observations,
+while both positive-control sentinels were observed. A zero sampled weight is
+not proof that an allocation can never occur; it means that this statistical
+sampler did not observe the site under the accepted workload.
 
-The frozen candidate must be profiled on the same workload, with the command,
-runtime, input hash, recording hash, summarized allocation weights, and
-interpretation retained in the final evidence package.
-
-Final post-change profile result: `PENDING_FINAL_PROFILE`.
+Final post-change profile result: **Pass**. The aggregate, semantic receipt,
+source/build/runtime receipt, and checksums are retained under
+[`docs/benchmarks/2026-07-25/profile/`](docs/benchmarks/2026-07-25/profile/).
+Raw JFR files are intentionally excluded because they can contain runtime
+metadata and are not required to reproduce the published aggregate.
 
 ## Known limits and deferred work
 
@@ -339,25 +368,45 @@ These are documented boundaries, not hidden acceptance exceptions. Future work
 should be prioritized only when a representative workload and semantic
 equivalence test justify it.
 
-## Final acceptance checklist
+## Source acceptance checklist
 
-- [ ] Candidate commit and release tag are frozen and recorded.
-- [ ] Generated JARs and build outputs are not tracked.
-- [ ] Java 11 and Java 21 local gates pass from the frozen commit.
-- [ ] Linux and macOS CI jobs pass for the frozen commit.
-- [ ] Strict compilation and all regression suites pass.
-- [ ] Consecutive release-candidate builds are byte-for-byte identical.
-- [ ] Locked dependency checksums and the final OSV audit pass.
-- [ ] Benchmark outputs are semantically equivalent and the evidence manifest
-      verifies.
-- [ ] Final benchmark results and limitations are published in
-      `docs/PERFORMANCE.md`.
-- [ ] The post-change profile receipt is retained and interpreted.
-- [ ] The release archive, SPDX SBOM, checksums, receipt, and provenance
-      attestation are present.
-- [ ] Public documentation contains no organization-specific branding,
-      private paths, or unsupported performance claims.
-- [ ] Independent code, benchmark, documentation, and release-workflow reviews
+- [x] The production-source and measured-harness freeze is recorded by
+      immutable commit; the sealed bundle retains the exact harness snapshot.
+- [x] Generated JARs and build outputs are excluded from source control.
+- [x] Java 11 and Java 21 local gates pass from the frozen source.
+- [x] Strict compilation and all regression suites pass.
+- [x] Consecutive Java 11 release-candidate builds are byte-for-byte identical.
+- [x] Locked dependency checksums and the live local OSV audit pass.
+- [x] Benchmark outputs are semantically equivalent and both retained checksum
+      layers verify.
+- [x] Final benchmark results and limitations are published in
+      [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
+- [x] The post-change profile receipt is retained and interpreted.
+- [x] Public documentation and curated evidence contain no
+      organization-specific branding, private paths, or unsupported
+      performance claims.
+- [x] Independent code, benchmark, documentation, and release-workflow reviews
       have no unresolved release-blocking findings.
 
-Final acceptance decision: `PENDING_FINAL_RUN`.
+## Publication gate
+
+Source acceptance does not claim that a GitHub release already exists. Before
+the annotated `v2.0.0` tag is published:
+
+1. the final documentation/evidence commit must pass the Linux Java 11/21,
+   macOS Java 11, repository-hygiene, and reproducible-build jobs;
+2. the live dependency-audit workflow must pass;
+3. `scripts/build-release.sh v2.0.0` must produce and verify the archive,
+   SPDX SBOM, checksums, licenses/notices, launcher, and build receipt from the
+   clean tag target; and
+4. the release workflow must publish those assets and request GitHub build
+   provenance attestations.
+
+These results are necessarily identified by the eventual tag, workflow run
+metadata, release asset hashes, and attestations. They are not guessed inside
+the source commit they authenticate.
+
+Final acceptance decision: **the frozen production source, measured validation
+tool snapshot, benchmark, profile, neutral publication cleanup, and public
+documentation are accepted for v2.0.0 publication. Release publication
+remains conditional on the external gate above.**

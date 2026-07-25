@@ -1,0 +1,22 @@
+* text=auto
+
+*.cff text eol=lf
+*.csv text eol=lf
+*.fastq text eol=lf
+*.java text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.properties text eol=lf
+*.py text eol=lf
+*.sam text eol=lf
+*.sha256 text eol=lf
+*.sh text eol=lf
+*.tsv text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+SHA256SUMS text eol=lf
+dependencies.lock text eol=lf
+
+# Empty final TSV fields and captured tool output are byte-preserved evidence.
+docs/benchmarks/**/benchmark/*.tsv whitespace=-blank-at-eol
+docs/benchmarks/**/benchmark/environment.txt whitespace=-blank-at-eol

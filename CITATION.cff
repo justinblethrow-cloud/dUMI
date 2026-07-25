@@ -2,6 +2,8 @@ cff-version: 1.2.0
 message: "If you use dUMI, cite this software and the original UMICollapse paper."
 title: "dUMI"
 type: software
+version: "2.0.0"
+date-released: "2026-07-25"
 authors:
   - name: "dUMI contributors"
 abstract: >-

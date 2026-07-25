@@ -1,0 +1,37 @@
+{
+  "expected_output": {
+    "canonical_record_sha256": "8471d526f9930e2373263bb83a678f6800fe67e60ab4ab6497f56df2c423a864",
+    "canonicalization": "SHA-256 of byte-sorted non-header SAM alignment lines, each terminated by LF",
+    "profile": "directional-k1-p0.5-mapqual-or-avgqual",
+    "records": 65536
+  },
+  "generator": {
+    "command": "generate_workload.py moderate --groups 4096 --families-per-group 16 --seed 1729 --output '<OUTPUT_SAM>' --metadata '<METADATA_JSON>'",
+    "python": "3.12.3",
+    "source": "scripts/benchmark/generate_workload.py",
+    "source_sha256": "d83a74ec634d1f9549b0fa94e49318f1f76770e1cf4ee3a2c6c393d3fd34cf1a",
+    "version": "1.0.0"
+  },
+  "input": {
+    "bytes": 152104109,
+    "format": "SAM",
+    "path": "input.sam",
+    "records": 917504,
+    "reference_dictionary_sha256": "dfd74c709c02c3d1723dd2727760b7cf74a166e9ec1f671a7f41bb529aa5e430",
+    "reference_sequences": 1,
+    "sha256": "e4817c623e7b6efd3dc6856d380a4615bc7f020fe9d6e87c0e0648e6f7ef3ecf",
+    "sort_order": "coordinate"
+  },
+  "parameters": {
+    "child_copies": 2,
+    "children_per_family": 3,
+    "families_per_group": 16,
+    "groups": 4096,
+    "parent_copies": 8,
+    "seed": 1729,
+    "umi_length": 12
+  },
+  "schema_version": 1,
+  "workload": "moderate",
+  "workload_id": "moderate__groups-4096__families_per_group-16__children_per_family-3__parent_copies-8__child_copies-2__seed-1729"
+}
