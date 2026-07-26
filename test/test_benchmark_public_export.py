@@ -2448,6 +2448,24 @@ class PublicExternalExportContracts(unittest.TestCase):
             set(EXPORTER.CHECKSUMMED_PUBLIC_FILES),
         )
 
+    def test_private_toolchain_placeholders_are_accepted_in_path(self) -> None:
+        recorded_path = (
+            "<SAMTOOLS_PREFIX>/bin:<JAVA_PREFIX>/bin:/usr/local/bin:/usr/bin"
+        )
+        environment_path = self.fixture.bundle / "environment.json"
+        environment = json.loads(environment_path.read_text(encoding="utf-8"))
+        environment["subprocess_environment"]["PATH"] = recorded_path
+        write_json(environment_path, environment)
+
+        manifest_path = self.fixture.bundle / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["subprocess_environment"]["PATH"] = recorded_path
+        write_json(manifest_path, manifest)
+
+        self.fixture.reseal()
+        completed = self.fixture.run()
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_lowercase_private_token_and_branding_are_rejected(self) -> None:
         for description in (
             f"Neutral panel for {PRIVATE_TOKEN}",

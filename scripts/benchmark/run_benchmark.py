@@ -377,6 +377,38 @@ def summarize_partial_failure(output_root: Path) -> None:
     )
 
 
+def private_tool_prefix_replacements(
+    tools: Sequence[tuple[str, Path]],
+) -> list[tuple[str, str]]:
+    """Return exact replacements for tool installations under private roots."""
+
+    private_roots = (Path("/mnt"), Path("/home"), Path("/Users"))
+    replacements: list[tuple[str, str]] = []
+    seen: set[Path] = set()
+    for label, executable in tools:
+        bin_directory = executable.parent
+        prefix = (
+            bin_directory.parent
+            if bin_directory.name == "bin"
+            else bin_directory
+        )
+        if (
+            prefix in seen
+            or prefix in private_roots
+            or not any(root in prefix.parents for root in private_roots)
+        ):
+            continue
+        seen.add(prefix)
+        prefix_text = os.fspath(prefix)
+        replacements.extend(
+            (
+                (prefix_text + os.sep, f"<{label}_PREFIX>/"),
+                (prefix_text + "=", f"<{label}_PREFIX>="),
+            )
+        )
+    return replacements
+
+
 def sanitize_public_text(value: str) -> str:
     sanitized = value
     for private, replacement in sorted(
@@ -4266,20 +4298,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise BenchmarkError(
             "java and javac must resolve to the same JDK bin directory"
         )
+    resolved_tools = [
+        ("PYTHON", python),
+        ("GIT", git),
+        ("CURL", curl),
+        ("SAMTOOLS", samtools),
+        ("GNU_TIME", gnu_time),
+        *([("GNU_SORT", gnu_sort)] if gnu_sort is not None else []),
+        ("JAVA", java),
+        ("JAVAC", javac),
+    ]
     PUBLIC_PATH_REPLACEMENTS.extend(
         [
-            (os.fspath(python), "<PYTHON>"),
-            (os.fspath(git), "<GIT>"),
-            (os.fspath(curl), "<CURL>"),
-            (os.fspath(samtools), "<SAMTOOLS>"),
-            (os.fspath(gnu_time), "<GNU_TIME>"),
-            *(
-                [(os.fspath(gnu_sort), "<GNU_SORT>")]
-                if gnu_sort is not None
-                else []
-            ),
-            (os.fspath(java), "<JAVA>"),
-            (os.fspath(javac), "<JAVAC>"),
+            *[
+                (os.fspath(path), f"<{label}>")
+                for label, path in resolved_tools
+            ],
+            *private_tool_prefix_replacements(resolved_tools),
         ]
     )
     pass_through_names = (

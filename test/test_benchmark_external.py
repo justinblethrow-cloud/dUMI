@@ -702,6 +702,68 @@ class ExternalBenchmarkTest(unittest.TestCase):
         ):
             RUNNER.scan_public_evidence(output_root, ROOT)
 
+    def test_private_tool_prefixes_sanitize_environment_receipts(self) -> None:
+        tools = (
+            ("SAMTOOLS", Path("/mnt/private/samtools-env/bin/samtools")),
+            ("JAVA", Path("/Users/private user/jdk/bin/java")),
+            ("GIT", Path("/usr/bin/git")),
+        )
+        RUNNER.PUBLIC_PATH_REPLACEMENTS = [
+            *[
+                (str(path), f"<{label}>")
+                for label, path in tools
+            ],
+            *RUNNER.private_tool_prefix_replacements(tools),
+        ]
+        raw = {
+            "subprocess_environment": {
+                "PATH": (
+                    "/mnt/private/samtools-env/bin:"
+                    "/Users/private user/jdk/bin:/usr/bin"
+                )
+            },
+            "samtools": "\n".join(
+                (
+                    "samtools 1.20",
+                    "CPPFLAGS=-I/mnt/private/samtools-env/include -O2",
+                    (
+                        "LDFLAGS=-L/mnt/private/samtools-env/lib "
+                        "-Wl,-rpath,/mnt/private/samtools-env/lib"
+                    ),
+                    (
+                        "-fdebug-prefix-map="
+                        "/mnt/private/samtools-env/build=/usr/local/src/samtools"
+                    ),
+                )
+            ),
+        }
+
+        sanitized = RUNNER.sanitize_public_text(json.dumps(raw))
+
+        self.assertIn("<SAMTOOLS_PREFIX>/bin", sanitized)
+        self.assertIn("<JAVA_PREFIX>/bin", sanitized)
+        self.assertIn("-I<SAMTOOLS_PREFIX>/include", sanitized)
+        self.assertIn("-L<SAMTOOLS_PREFIX>/lib", sanitized)
+        self.assertIn(
+            "<SAMTOOLS_PREFIX>/build=/usr/local/src/samtools",
+            sanitized,
+        )
+        sibling_path = "/mnt/private/samtools-env-copy/include"
+        self.assertEqual(
+            RUNNER.sanitize_public_text(sibling_path),
+            sibling_path,
+        )
+        for private_root in ("/mnt/", "/home/", "/Users/"):
+            self.assertNotIn(private_root, sanitized)
+
+        output_root = self.root / "evidence"
+        output_root.mkdir()
+        for filename in ("environment.json", "environment.txt", "manifest.json"):
+            (output_root / filename).write_text(
+                sanitized + "\n", encoding="utf-8"
+            )
+        RUNNER.scan_public_evidence(output_root, ROOT)
+
     def test_unexpected_private_sam_cannot_survive_external_sealing(self) -> None:
         output_root = self.root / "evidence"
         private_sam = output_root / "oracles" / "private-path.sam"
