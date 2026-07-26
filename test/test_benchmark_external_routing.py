@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import stat
 import subprocess
 import sys
@@ -1075,6 +1076,10 @@ class ExternalRoutingContracts(unittest.TestCase):
                 )
 
     def test_paired_forced_on_arbitrary_failure_is_not_ineligibility(self) -> None:
+        false_command = shutil.which("false")
+        true_command = shutil.which("true")
+        if false_command is None or true_command is None:
+            self.skipTest("true and false commands are required")
         entry = RUNNER.ExternalBamInput(
             workload_id="demo-pe-01",
             bam_path=Path("/not-opened/input.bam"),
@@ -1100,11 +1105,11 @@ class ExternalRoutingContracts(unittest.TestCase):
                     workload=workload,
                     bam_input=entry.bam_path,
                     root=Path(directory_string) / "probe",
-                    java=Path("/bin/false"),
+                    java=Path(false_command).resolve(),
                     jvm_options=(),
                     classes_root=Path("/unused/classes"),
                     common_classpath="",
-                    samtools=Path("/bin/true"),
+                    samtools=Path(true_command).resolve(),
                 )
 
 
@@ -1267,6 +1272,10 @@ class ExternalRoutingContracts(unittest.TestCase):
     def test_sigterm_kills_timed_process_tree_before_private_cleanup(
         self,
     ) -> None:
+        try:
+            gnu_time = RUNNER.find_gnu_time(None)
+        except RUNNER.BenchmarkError:
+            self.skipTest("GNU time is required for process-tree timing")
         program = r"""
 import importlib.util
 from pathlib import Path
@@ -1345,7 +1354,7 @@ raise SystemExit(module.cli_entrypoint(sleeper))
                     program,
                     str(RUNNER_PATH),
                     str(output_root),
-                    str(RUNNER.find_gnu_time(None)),
+                    str(gnu_time),
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
