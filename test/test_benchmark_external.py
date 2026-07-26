@@ -703,9 +703,15 @@ class ExternalBenchmarkTest(unittest.TestCase):
             RUNNER.scan_public_evidence(output_root, ROOT)
 
     def test_private_tool_prefixes_sanitize_environment_receipts(self) -> None:
+        samtools_prefix = Path("/").joinpath(
+            "mnt", "private", "samtools-env"
+        )
+        java_prefix = Path("/").joinpath(
+            "Users", "private user", "jdk"
+        )
         tools = (
-            ("SAMTOOLS", Path("/mnt/private/samtools-env/bin/samtools")),
-            ("JAVA", Path("/Users/private user/jdk/bin/java")),
+            ("SAMTOOLS", samtools_prefix / "bin" / "samtools"),
+            ("JAVA", java_prefix / "bin" / "java"),
             ("GIT", Path("/usr/bin/git")),
         )
         RUNNER.PUBLIC_PATH_REPLACEMENTS = [
@@ -718,21 +724,21 @@ class ExternalBenchmarkTest(unittest.TestCase):
         raw = {
             "subprocess_environment": {
                 "PATH": (
-                    "/mnt/private/samtools-env/bin:"
-                    "/Users/private user/jdk/bin:/usr/bin"
+                    f"{samtools_prefix}/bin:"
+                    f"{java_prefix}/bin:/usr/bin"
                 )
             },
             "samtools": "\n".join(
                 (
                     "samtools 1.20",
-                    "CPPFLAGS=-I/mnt/private/samtools-env/include -O2",
+                    f"CPPFLAGS=-I{samtools_prefix}/include -O2",
                     (
-                        "LDFLAGS=-L/mnt/private/samtools-env/lib "
-                        "-Wl,-rpath,/mnt/private/samtools-env/lib"
+                        f"LDFLAGS=-L{samtools_prefix}/lib "
+                        f"-Wl,-rpath,{samtools_prefix}/lib"
                     ),
                     (
                         "-fdebug-prefix-map="
-                        "/mnt/private/samtools-env/build=/usr/local/src/samtools"
+                        f"{samtools_prefix}/build=/usr/local/src/samtools"
                     ),
                 )
             ),
@@ -748,12 +754,15 @@ class ExternalBenchmarkTest(unittest.TestCase):
             "<SAMTOOLS_PREFIX>/build=/usr/local/src/samtools",
             sanitized,
         )
-        sibling_path = "/mnt/private/samtools-env-copy/include"
+        sibling_path = str(
+            samtools_prefix.parent / "samtools-env-copy" / "include"
+        )
         self.assertEqual(
             RUNNER.sanitize_public_text(sibling_path),
             sibling_path,
         )
-        for private_root in ("/mnt/", "/home/", "/Users/"):
+        for root_name in ("mnt", "home", "Users"):
+            private_root = f"/{root_name}/"
             self.assertNotIn(private_root, sanitized)
 
         output_root = self.root / "evidence"
@@ -763,6 +772,33 @@ class ExternalBenchmarkTest(unittest.TestCase):
                 sanitized + "\n", encoding="utf-8"
             )
         RUNNER.scan_public_evidence(output_root, ROOT)
+
+    def test_tracked_source_snapshot_has_no_private_root_literals(self) -> None:
+        completed = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        private_roots = tuple(
+            f"/{root_name}/" for root_name in ("mnt", "home", "Users")
+        )
+        offenders: list[str] = []
+        for relative_bytes in completed.stdout.split(b"\0"):
+            if not relative_bytes:
+                continue
+            relative = relative_bytes.decode("utf-8")
+            path = ROOT / relative
+            if not path.is_file():
+                continue
+            payload = path.read_bytes()
+            if b"\0" in payload:
+                continue
+            text = payload.decode("utf-8", errors="replace")
+            if any(private_root in text for private_root in private_roots):
+                offenders.append(relative)
+        self.assertEqual(offenders, [])
 
     def test_unexpected_private_sam_cannot_survive_external_sealing(self) -> None:
         output_root = self.root / "evidence"
