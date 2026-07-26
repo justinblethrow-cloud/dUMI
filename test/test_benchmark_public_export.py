@@ -3796,7 +3796,7 @@ class PublicExternalExportContracts(unittest.TestCase):
             def leave_published_output(
                 path: Path, *args: object, **kwargs: object
             ) -> None:
-                if Path(path) == fixture.output:
+                if Path(path).resolve() == fixture.output.resolve():
                     return
                 original_rmtree(path, *args, **kwargs)
 
