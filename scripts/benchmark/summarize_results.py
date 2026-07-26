@@ -61,7 +61,7 @@ ALIASES = {
 }
 
 GROUP_FIELDS = ("workload", "scale", "stage", "implementation", "mode")
-PAIR_FIELDS = ("workload", "scale", "implementation", "mode", "repetition")
+MEASURED_STAGES = ("raw", "end_to_end_ready")
 METRICS = ("elapsed_s", "user_s", "system_s", "cpu_pct", "max_rss_kib")
 SUMMARY_PREFIX_FIELDS = (
     *GROUP_FIELDS,
@@ -69,6 +69,8 @@ SUMMARY_PREFIX_FIELDS = (
     "successful_repetitions",
     "failed_repetitions",
     "correctness_status",
+    "comparability_status",
+    "comparability_issues",
     "input_sha256",
     "output_records",
     "semantic_sha256",
@@ -97,6 +99,14 @@ DESIGN_FIELDS = (
 CORRECTNESS_FIELDS = (
     *GROUP_FIELDS,
     "correctness_status",
+    "directional_oracle_gate_pass",
+    "dumi_off_oracle_partition_equivalent",
+    "dumi_off_oracle_root_assignment_equivalent",
+    "canonical_upstream_oracle_partition_equivalent",
+    "canonical_upstream_oracle_root_assignment_equivalent",
+    "canonical_upstream_dumi_off_partition_equivalent",
+    "canonical_upstream_dumi_off_root_assignment_equivalent",
+    "directional_oracle_receipt",
     "issue_count",
     "issues",
 )
@@ -118,6 +128,9 @@ COMPARISON_FIELDS = (
     "failed_pairs",
     "correctness_status",
     "issues",
+    "comparability_status",
+    "comparability_issues",
+    "noncomparable_pairs",
     *(
         f"{metric}_{statistic}"
         for metric in COMPARISON_METRICS
@@ -125,6 +138,52 @@ COMPARISON_FIELDS = (
     ),
 )
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+EXTERNAL_WORKLOAD = "external"
+EXTERNAL_CROSS_OUTPUT_COUNT_MATCH = (
+    "cross_implementation_output_count_match"
+)
+EXTERNAL_CROSS_ALIGNMENT_GROUP_OUTPUT_COUNT_MATCH = (
+    "cross_implementation_alignment_group_output_count_match"
+)
+EXTERNAL_DIRECTIONAL_ORACLE_GATE_PASS = "directional_oracle_gate_pass"
+EXTERNAL_DUMI_ORACLE_REQUIRED_FIELDS = (
+    "dumi_off_oracle_partition_equivalent",
+    "dumi_off_oracle_root_assignment_equivalent",
+)
+EXTERNAL_DIRECTIONAL_DIAGNOSTIC_FIELDS = (
+    "canonical_upstream_oracle_partition_equivalent",
+    "canonical_upstream_oracle_root_assignment_equivalent",
+    "canonical_upstream_dumi_off_partition_equivalent",
+    "canonical_upstream_dumi_off_root_assignment_equivalent",
+)
+EXTERNAL_DIRECTIONAL_ORACLE_RECEIPT = "directional_oracle_receipt"
+NONCOMPARABLE_OUTPUT_COUNT_ISSUE = (
+    "cross-implementation-output-count-mismatch"
+)
+EXTERNAL_ORACLE_IMPLEMENTATIONS = {
+    "canonical-upstream": "canonical-upstream",
+    "dumi": "dumi-off",
+}
+EXACT_ORACLE_EVIDENCE_FIELDS = (
+    "output_records",
+    "semantic_sha256",
+    "reference_sequences",
+    "reference_dictionary_sha256",
+    "expected_output_records",
+    "expected_semantic_sha256",
+    "expected_reference_sequences",
+    "expected_reference_dictionary_sha256",
+)
+EXPECTED_ORACLE_EVIDENCE_FIELDS = (
+    "expected_output_records",
+    "expected_semantic_sha256",
+    "expected_reference_sequences",
+    "expected_reference_dictionary_sha256",
+)
+CROSS_IMPLEMENTATION_EXACT_FIELDS = (
+    "expected_output_records",
+    "expected_semantic_sha256",
+)
 
 
 class SummaryError(RuntimeError):
@@ -208,9 +267,10 @@ def read_design(path: Path) -> list[dict[str, str]]:
                     raise SummaryError(
                         f"{path}:{line_number}: design field {field} is empty"
                     )
-            if row["stage"] not in ("raw", "ready"):
+            if row["stage"] not in MEASURED_STAGES:
                 raise SummaryError(
-                    f"{path}:{line_number}: design stage must be raw or ready"
+                    f"{path}:{line_number}: design stage must be one of "
+                    + ", ".join(MEASURED_STAGES)
                 )
             integer_value(row["repetition"], "repetition", f"design line {line_number}")
             integer_value(row["order"], "order", f"design line {line_number}")
@@ -273,13 +333,10 @@ def validate_design_schedule(rows: list[dict[str, str]]) -> None:
             )
 
     for key, trial_rows in by_trial.items():
-        if {row["stage"] for row in trial_rows} != {"raw", "ready"}:
+        if {row["stage"] for row in trial_rows} != set(MEASURED_STAGES):
             raise SummaryError(
-                f"design trial {'/'.join(key)} must have raw and ready rows"
-            )
-        if len({row["order"] for row in trial_rows}) != 1:
-            raise SummaryError(
-                f"design trial {'/'.join(key)} changes order between stages"
+                f"design trial {'/'.join(key)} must have one row for every "
+                "measured stage"
             )
 
     for key, scope_rows in by_scope.items():
@@ -310,6 +367,35 @@ def validate_design_schedule(rows: list[dict[str, str]]) -> None:
                 raise SummaryError(
                     f"design scope {'/'.join(key)} does not balance {label} "
                     "across order positions"
+                )
+        if len(treatments) % 2 == 0:
+            ordered_treatments = sorted(treatments)
+            carryover_counts = {
+                (left, right): 0
+                for left in ordered_treatments
+                for right in ordered_treatments
+                if left != right
+            }
+            by_repetition_rows: dict[str, list[dict[str, str]]] = (
+                defaultdict(list)
+            )
+            for row in scope_rows:
+                by_repetition_rows[row["repetition"]].append(row)
+            for repetition_rows in by_repetition_rows.values():
+                sequence = [
+                    (row["implementation"], row["mode"])
+                    for row in sorted(
+                        repetition_rows,
+                        key=lambda candidate: int(candidate["order"]),
+                    )
+                ]
+                for left, right in zip(sequence, sequence[1:]):
+                    carryover_counts[(left, right)] += 1
+            observed = list(carryover_counts.values())
+            if max(observed) - min(observed) > 1:
+                raise SummaryError(
+                    f"design scope {'/'.join(key)} does not balance "
+                    "first-order treatment carryover"
                 )
 
 
@@ -399,6 +485,62 @@ def validate_rows(rows: list[dict[str, str]]) -> list[str]:
         for field in required_text:
             if not row[field]:
                 raise SummaryError(f"{context}: {field} is empty")
+        if row["stage"] not in MEASURED_STAGES:
+            raise SummaryError(
+                f"{context}: stage must be one of "
+                + ", ".join(MEASURED_STAGES)
+            )
+        if row["workload"] == EXTERNAL_WORKLOAD:
+            if boolean_measurement_value(row, "exact_oracle_match") is not True:
+                add_issue(
+                    f"{context}: external measurement is missing a true "
+                    "exact_oracle_match"
+                )
+            expected_oracle = EXTERNAL_ORACLE_IMPLEMENTATIONS.get(
+                row["implementation"]
+            )
+            if (
+                expected_oracle is None
+                or row.get("oracle_implementation", "") != expected_oracle
+            ):
+                add_issue(
+                    f"{context}: external oracle_implementation does not match "
+                    f"the {row['implementation']} implementation contract"
+                )
+            if (
+                boolean_measurement_value(
+                    row, "cross_implementation_exact_match"
+                )
+                is None
+            ):
+                add_issue(
+                    f"{context}: external measurement is missing a valid "
+                    "boolean cross_implementation_exact_match"
+                )
+            for field in (
+                EXTERNAL_CROSS_OUTPUT_COUNT_MATCH,
+                EXTERNAL_CROSS_ALIGNMENT_GROUP_OUTPUT_COUNT_MATCH,
+                *EXTERNAL_DIRECTIONAL_DIAGNOSTIC_FIELDS,
+            ):
+                if boolean_measurement_value(row, field) is None:
+                    add_issue(
+                        f"{context}: external measurement is missing a valid "
+                        f"boolean {field}"
+                    )
+            for field in (
+                EXTERNAL_DIRECTIONAL_ORACLE_GATE_PASS,
+                *EXTERNAL_DUMI_ORACLE_REQUIRED_FIELDS,
+            ):
+                if boolean_measurement_value(row, field) is not True:
+                    add_issue(
+                        f"{context}: external measurement is missing a true "
+                        f"{field}"
+                    )
+            if not row.get(EXTERNAL_DIRECTIONAL_ORACLE_RECEIPT, "").strip():
+                add_issue(
+                    f"{context}: external measurement is missing a nonempty "
+                    f"{EXTERNAL_DIRECTIONAL_ORACLE_RECEIPT}"
+                )
         by_run_id[row["run_id"]].append(row)
         integer_value(row["repetition"], "repetition", context)
         integer_value(row["order"], "order", context)
@@ -464,7 +606,8 @@ def validate_rows(rows: list[dict[str, str]]) -> list[str]:
         ):
             if row[observed] and row[expected] and row[observed] != row[expected]:
                 add_issue(
-                    f"{context}: {observed} does not match generator oracle {expected}"
+                    f"{context}: {observed} does not match recorded workload "
+                    f"oracle {expected}"
                 )
     for run_id, matching_rows in by_run_id.items():
         if len(matching_rows) < 2:
@@ -480,155 +623,21 @@ def row_key(row: dict[str, str], fields: Iterable[str]) -> tuple[str, ...]:
     return tuple(row[field] for field in fields)
 
 
-def derived_row(
-    raw: dict[str, str] | None,
-    ready: dict[str, str] | None,
-    key: tuple[str, ...],
-) -> dict[str, str]:
-    source = raw if raw is not None else ready
-    assert source is not None
-    row = {field: source.get(field, "") for field in RAW_FIELDS}
-    row["_line"] = f"derived({','.join(key)})"
-    row["_validation_issues"] = [
-        f"raw stage: {issue}"
-        for issue in (raw or {}).get("_validation_issues", [])
-    ] + [
-        f"ready stage: {issue}"
-        for issue in (ready or {}).get("_validation_issues", [])
-    ]
-    row["run_id"] = "+".join(
-        candidate["run_id"] for candidate in (raw, ready) if candidate is not None
-    )
-    row["stage"] = "raw_plus_ready"
-    row["_derived_issue"] = ""
-    if raw is None or ready is None:
-        missing = "raw" if raw is None else "ready"
-        row["exit_code"] = "1"
-        row["_derived_issue"] = f"missing {missing} stage"
-        for metric in METRICS:
-            row[metric] = ""
-        row["output_records"] = ""
-        row["semantic_sha256"] = ""
-        row["sort_order"] = ""
-        row["output_bytes"] = ""
-        row["output_sha256"] = ""
-        row["reference_sequences"] = ""
-        row["reference_dictionary_sha256"] = ""
-        return row
-
-    raw_exit = int(raw["exit_code"])
-    ready_exit = int(ready["exit_code"])
-    row["exit_code"] = str(raw_exit if raw_exit != 0 else ready_exit)
-    for metric in ("elapsed_s", "user_s", "system_s"):
-        if raw[metric] and ready[metric]:
-            row[metric] = format_decimal(
-                decimal_value(raw[metric], metric, f"derived {key}")
-                + decimal_value(ready[metric], metric, f"derived {key}")
-            )
-        else:
-            row[metric] = ""
-    if raw["max_rss_kib"] and ready["max_rss_kib"]:
-        row["max_rss_kib"] = format_decimal(
-            max(
-                decimal_value(raw["max_rss_kib"], "max_rss_kib", f"derived {key}"),
-                decimal_value(
-                    ready["max_rss_kib"], "max_rss_kib", f"derived {key}"
-                ),
-            )
-        )
-    else:
-        row["max_rss_kib"] = ""
-    if row["elapsed_s"] and row["user_s"] and row["system_s"]:
-        elapsed = Decimal(row["elapsed_s"])
-        cpu_time = Decimal(row["user_s"]) + Decimal(row["system_s"])
-        row["cpu_pct"] = (
-            format_decimal(cpu_time * Decimal(100) / elapsed)
-            if elapsed != 0
-            else ""
-        )
-    else:
-        row["cpu_pct"] = ""
-
-    row["output_records"] = ready["output_records"]
-    row["semantic_sha256"] = ready["semantic_sha256"]
-    row["sort_order"] = ready["sort_order"]
-    row["output_bytes"] = ready["output_bytes"]
-    row["output_sha256"] = ready["output_sha256"]
-    row["reference_sequences"] = ready["reference_sequences"]
-    row["reference_dictionary_sha256"] = ready[
-        "reference_dictionary_sha256"
-    ]
-    row["output_file"] = ready["output_file"]
-    if (
-        raw_exit == 0
-        and ready_exit == 0
-        and (
-            raw["output_records"] != ready["output_records"]
-            or raw["semantic_sha256"] != ready["semantic_sha256"]
-            or raw["reference_sequences"] != ready["reference_sequences"]
-            or raw["reference_dictionary_sha256"]
-            != ready["reference_dictionary_sha256"]
-        )
-    ):
-        row["_derived_issue"] = (
-            "raw and ready record multisets or reference dictionaries differ"
-        )
-    if raw["input_sha256"] != ready["input_sha256"]:
-        separator = "; " if row["_derived_issue"] else ""
-        row["_derived_issue"] += separator + "raw and ready input hashes differ"
-    return row
+def external_performance_is_comparable(row: dict[str, str]) -> bool:
+    return boolean_measurement_value(
+        row, EXTERNAL_CROSS_OUTPUT_COUNT_MATCH
+    ) is True
 
 
-def add_raw_plus_ready(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    stages: dict[
-        tuple[str, ...],
-        dict[str, list[dict[str, str]]],
-    ] = defaultdict(lambda: defaultdict(list))
-    for row in rows:
-        if row["stage"] not in ("raw", "ready"):
-            continue
-        key = row_key(row, PAIR_FIELDS)
-        stages[key][row["stage"]].append(row)
-    derived: list[dict[str, str]] = []
-    for key, by_stage in sorted(stages.items()):
-        raw_rows = by_stage.get("raw", [])
-        ready_rows = by_stage.get("ready", [])
-        if len(raw_rows) <= 1 and len(ready_rows) <= 1:
-            derived.append(
-                derived_row(
-                    raw_rows[0] if raw_rows else None,
-                    ready_rows[0] if ready_rows else None,
-                    key,
-                )
-            )
-            continue
-        source = (raw_rows + ready_rows)[0]
-        invalid = {field: source.get(field, "") for field in RAW_FIELDS}
-        invalid.update(
-            {
-                "run_id": "+".join(
-                    row["run_id"] for row in raw_rows + ready_rows
-                ),
-                "stage": "raw_plus_ready",
-                "exit_code": "1",
-                "elapsed_s": "",
-                "user_s": "",
-                "system_s": "",
-                "cpu_pct": "",
-                "max_rss_kib": "",
-                "output_records": "",
-                "semantic_sha256": "",
-                "sort_order": "",
-                "_line": f"derived({','.join(key)})",
-                "_validation_issues": [],
-                "_derived_issue": (
-                    f"expected one raw and one ready row; found "
-                    f"{len(raw_rows)} raw and {len(ready_rows)} ready"
-                ),
-            }
-        )
-        derived.append(invalid)
-    return rows + derived
+def boolean_measurement_value(
+    row: dict[str, str], field: str
+) -> bool | None:
+    text = row.get(field, "").strip().lower()
+    if text == "true":
+        return True
+    if text == "false":
+        return False
+    return None
 
 
 def median(numbers: list[Decimal]) -> Decimal:
@@ -677,8 +686,13 @@ def check_correctness(
 ) -> list[str]:
     issues: list[str] = []
     by_scope: dict[tuple[str, str, str], list[dict[str, str]]] = defaultdict(list)
+    by_external_workload: dict[
+        tuple[str, str], list[dict[str, str]]
+    ] = defaultdict(list)
     for row in rows:
         by_scope[(row["workload"], row["scale"], row["stage"])].append(row)
+        if row["workload"] == EXTERNAL_WORKLOAD:
+            by_external_workload[(row["workload"], row["scale"])].append(row)
         cell = cells[row_key(row, GROUP_FIELDS)]
         cell.issues.extend(row.get("_validation_issues", []))
         if int(row["exit_code"]) != 0:
@@ -726,7 +740,7 @@ def check_correctness(
         inputs = {row["input_sha256"] for row in cell.rows if row["input_sha256"]}
         if len(inputs) > 1:
             cell.issues.append("repetitions use different input hashes")
-        if cell.key[2] in ("ready", "raw_plus_ready"):
+        if cell.key[2] == "end_to_end_ready":
             non_coordinate = {
                 row["sort_order"]
                 for row in successful
@@ -765,13 +779,152 @@ def check_correctness(
             issues.append(message)
             for key in affected:
                 cells[key].issues.append(message)
-        if len(fingerprints) > 1:
+        if scope[0] == EXTERNAL_WORKLOAD:
+            by_oracle: dict[str, list[dict[str, str]]] = defaultdict(list)
+            for row in successful:
+                by_oracle[row.get("oracle_implementation", "")].append(row)
+            for oracle, oracle_rows in by_oracle.items():
+                oracle_fingerprints = {
+                    tuple(row[field] for field in EXACT_ORACLE_EVIDENCE_FIELDS)
+                    for row in oracle_rows
+                }
+                if len(oracle_fingerprints) > 1:
+                    message = (
+                        f"{'/'.join(scope)} has inconsistent exact evidence "
+                        f"for external oracle {oracle}"
+                    )
+                    issues.append(message)
+                    for row in oracle_rows:
+                        cells[row_key(row, GROUP_FIELDS)].issues.append(message)
+            differing_evidence = False
+            message = ""
+        else:
+            differing_evidence = len(fingerprints) > 1
             message = (
                 f"{'/'.join(scope)} has non-equivalent record multisets across cells"
             )
+        if differing_evidence:
             issues.append(message)
             for key in affected:
                 cells[key].issues.append(message)
+
+    for workload, workload_rows in by_external_workload.items():
+        consistent_fields = (
+            "cross_implementation_exact_match",
+            EXTERNAL_CROSS_OUTPUT_COUNT_MATCH,
+            EXTERNAL_CROSS_ALIGNMENT_GROUP_OUTPUT_COUNT_MATCH,
+            EXTERNAL_DIRECTIONAL_ORACLE_GATE_PASS,
+            *EXTERNAL_DUMI_ORACLE_REQUIRED_FIELDS,
+            *EXTERNAL_DIRECTIONAL_DIAGNOSTIC_FIELDS,
+            EXTERNAL_DIRECTIONAL_ORACLE_RECEIPT,
+        )
+        for field in consistent_fields:
+            observed = {
+                (
+                    row.get(field, "").strip()
+                    if field == EXTERNAL_DIRECTIONAL_ORACLE_RECEIPT
+                    else boolean_measurement_value(row, field)
+                )
+                for row in workload_rows
+            }
+            if len(observed) > 1:
+                message = (
+                    f"{'/'.join(workload)} has inconsistent {field} metadata"
+                )
+                issues.append(message)
+                for row in workload_rows:
+                    cells[row_key(row, GROUP_FIELDS)].issues.append(message)
+        rows_by_oracle: dict[str, list[dict[str, str]]] = defaultdict(list)
+        for row in workload_rows:
+            rows_by_oracle[
+                row.get("oracle_implementation", "")
+            ].append(row)
+        for oracle, oracle_rows in rows_by_oracle.items():
+            expected_fingerprints = {
+                tuple(
+                    row[field] for field in EXPECTED_ORACLE_EVIDENCE_FIELDS
+                )
+                for row in oracle_rows
+            }
+            if len(expected_fingerprints) > 1:
+                message = (
+                    f"{'/'.join(workload)} has inconsistent expected "
+                    f"evidence for external oracle {oracle}"
+                )
+                issues.append(message)
+                for row in oracle_rows:
+                    cells[row_key(row, GROUP_FIELDS)].issues.append(message)
+        required_oracles = {"canonical-upstream", "dumi-off"}
+        if required_oracles.issubset(rows_by_oracle):
+            upstream_exact = {
+                tuple(
+                    row[field] for field in CROSS_IMPLEMENTATION_EXACT_FIELDS
+                )
+                for row in rows_by_oracle["canonical-upstream"]
+            }
+            dumi_exact = {
+                tuple(
+                    row[field] for field in CROSS_IMPLEMENTATION_EXACT_FIELDS
+                )
+                for row in rows_by_oracle["dumi-off"]
+            }
+            reported_values = {
+                boolean_measurement_value(
+                    row, "cross_implementation_exact_match"
+                )
+                for row in workload_rows
+            }
+            if (
+                len(upstream_exact) == 1
+                and len(dumi_exact) == 1
+                and len(reported_values) == 1
+                and None not in reported_values
+            ):
+                observed_exact_match = upstream_exact == dumi_exact
+                reported_exact_match = next(iter(reported_values))
+                if reported_exact_match != observed_exact_match:
+                    message = (
+                        f"{'/'.join(workload)} reports "
+                        "cross_implementation_exact_match inconsistent with "
+                        "the implementation-oracle evidence"
+                    )
+                    issues.append(message)
+                    for row in workload_rows:
+                        cells[row_key(row, GROUP_FIELDS)].issues.append(message)
+            reported_output_count_values = {
+                boolean_measurement_value(
+                    row, EXTERNAL_CROSS_OUTPUT_COUNT_MATCH
+                )
+                for row in workload_rows
+            }
+            if (
+                len(upstream_exact) == 1
+                and len(dumi_exact) == 1
+                and len(reported_output_count_values) == 1
+                and None not in reported_output_count_values
+            ):
+                observed_output_count_match = {
+                    value[0] for value in upstream_exact
+                } == {
+                    value[0] for value in dumi_exact
+                }
+                reported_output_count_match = next(
+                    iter(reported_output_count_values)
+                )
+                if (
+                    reported_output_count_match
+                    != observed_output_count_match
+                ):
+                    message = (
+                        f"{'/'.join(workload)} reports "
+                        f"{EXTERNAL_CROSS_OUTPUT_COUNT_MATCH} inconsistent "
+                        "with the implementation-oracle evidence"
+                    )
+                    issues.append(message)
+                    for row in workload_rows:
+                        cells[row_key(row, GROUP_FIELDS)].issues.append(
+                            message
+                        )
 
     for cell in cells.values():
         for issue in cell.issues:
@@ -797,6 +950,16 @@ def summarize_cell(cell: Cell) -> dict[str, str]:
     reference_digests = sorted(
         {row["reference_dictionary_sha256"] for row in successful}
     )
+    noncomparable = (
+        cell.key[0] == EXTERNAL_WORKLOAD
+        and any(
+            boolean_measurement_value(
+                row, EXTERNAL_CROSS_OUTPUT_COUNT_MATCH
+            )
+            is False
+            for row in cell.rows
+        )
+    )
     summary = dict(zip(GROUP_FIELDS, cell.key))
     summary.update(
         {
@@ -804,6 +967,14 @@ def summarize_cell(cell: Cell) -> dict[str, str]:
             "successful_repetitions": str(len(successful)),
             "failed_repetitions": str(len(cell.rows) - len(successful)),
             "correctness_status": "fail" if cell.issues else "pass",
+            "comparability_status": (
+                "not_comparable" if noncomparable else "comparable"
+            ),
+            "comparability_issues": (
+                NONCOMPARABLE_OUTPUT_COUNT_ISSUE
+                if noncomparable
+                else ""
+            ),
             "input_sha256": ",".join(inputs),
             "output_records": ",".join(records),
             "semantic_sha256": ",".join(digests),
@@ -831,6 +1002,7 @@ def summarize_cell(cell: Cell) -> dict[str, str]:
 
 def build_comparisons(
     rows: list[dict[str, str]],
+    cells: dict[tuple[str, ...], Cell] | None = None,
 ) -> tuple[list[dict[str, str]], list[str]]:
     by_scope_repetition: dict[
         tuple[str, str, str, str], list[dict[str, str]]
@@ -849,6 +1021,9 @@ def build_comparisons(
         tuple[str, str, str, str, str],
         list[tuple[dict[str, str] | None, dict[str, str]]],
     ] = defaultdict(list)
+    external_dumi_oracles: dict[
+        tuple[str, str, str, str], dict[str, str] | None
+    ] = {}
     pair_setup_issues: dict[tuple[str, str, str, str, str], list[str]] = defaultdict(list)
     for scope, scope_rows in by_scope_repetition.items():
         baselines = [
@@ -866,6 +1041,16 @@ def build_comparisons(
             )
         ]
         baseline = baselines[0] if len(baselines) == 1 else None
+        if scope[0] == EXTERNAL_WORKLOAD:
+            dumi_off_rows = [
+                row
+                for row in scope_rows
+                if row["implementation"] == "dumi"
+                and row["mode"] == "off"
+            ]
+            external_dumi_oracles[scope] = (
+                dumi_off_rows[0] if len(dumi_off_rows) == 1 else None
+            )
         for treatment in treatments:
             key = (
                 treatment["workload"],
@@ -889,6 +1074,8 @@ def build_comparisons(
             metric: [] for metric in COMPARISON_METRICS
         }
         successful_pairs = 0
+        noncomparable_pairs = 0
+        comparability_issues: list[str] = []
         for baseline, treatment in pair_values:
             repetition = treatment["repetition"]
             if baseline is None:
@@ -906,22 +1093,89 @@ def build_comparisons(
             if not baseline_valid or not treatment_valid:
                 issues.append(f"repetition {repetition} has an invalid source row")
                 continue
-            equality_fields = (
-                "input_sha256",
-                "output_records",
-                "semantic_sha256",
-                "reference_sequences",
-                "reference_dictionary_sha256",
-                "expected_output_records",
-                "expected_semantic_sha256",
-                "expected_reference_sequences",
-                "expected_reference_dictionary_sha256",
-            )
+            if cells is not None:
+                failed_source_cells = [
+                    "/".join(row_key(source, GROUP_FIELDS))
+                    for source in (baseline, treatment)
+                    if cells[row_key(source, GROUP_FIELDS)].issues
+                ]
+                if failed_source_cells:
+                    issues.append(
+                        f"repetition {repetition} has failed correctness "
+                        "source cells: " + ", ".join(failed_source_cells)
+                    )
+                    continue
+            if treatment["workload"] == EXTERNAL_WORKLOAD:
+                oracle_scope = (
+                    treatment["workload"],
+                    treatment["scale"],
+                    treatment["stage"],
+                    treatment["repetition"],
+                )
+                dumi_oracle = external_dumi_oracles.get(oracle_scope)
+                if dumi_oracle is None:
+                    issues.append(
+                        f"repetition {repetition} does not have exactly one "
+                        "dumi-off external oracle row"
+                    )
+                    continue
+                dumi_oracle_valid = (
+                    int(dumi_oracle["exit_code"]) == 0
+                    and not dumi_oracle.get("_validation_issues")
+                    and not dumi_oracle.get("_derived_issue")
+                )
+                if not dumi_oracle_valid:
+                    issues.append(
+                        f"repetition {repetition} has an invalid dumi-off "
+                        "external oracle row"
+                    )
+                    continue
+                if any(
+                    treatment[field] != dumi_oracle[field]
+                    for field in EXPECTED_ORACLE_EVIDENCE_FIELDS
+                ):
+                    issues.append(
+                        f"repetition {repetition} treatment does not use the "
+                        "shared dumi-off external oracle"
+                    )
+                    continue
+                equality_fields = (
+                    "input_sha256",
+                    EXTERNAL_DIRECTIONAL_ORACLE_GATE_PASS,
+                    *EXTERNAL_DUMI_ORACLE_REQUIRED_FIELDS,
+                    *EXTERNAL_DIRECTIONAL_DIAGNOSTIC_FIELDS,
+                    EXTERNAL_DIRECTIONAL_ORACLE_RECEIPT,
+                )
+            else:
+                equality_fields = (
+                    "input_sha256",
+                    "output_records",
+                    "semantic_sha256",
+                    "reference_sequences",
+                    "reference_dictionary_sha256",
+                    "expected_output_records",
+                    "expected_semantic_sha256",
+                    "expected_reference_sequences",
+                    "expected_reference_dictionary_sha256",
+                )
             if any(
                 baseline[field] != treatment[field] for field in equality_fields
             ):
                 issues.append(
                     f"repetition {repetition} baseline and treatment evidence differ"
+                )
+                continue
+
+            if (
+                treatment["workload"] == EXTERNAL_WORKLOAD
+                and not (
+                    external_performance_is_comparable(baseline)
+                    and external_performance_is_comparable(treatment)
+                )
+            ):
+                noncomparable_pairs += 1
+                comparability_issues.append(
+                    NONCOMPARABLE_OUTPUT_COUNT_ISSUE
                 )
                 continue
 
@@ -963,6 +1217,9 @@ def build_comparisons(
             successful_pairs += 1
 
         unique_issues = list(dict.fromkeys(issues))
+        unique_comparability_issues = list(
+            dict.fromkeys(comparability_issues)
+        )
         row = {
             "workload": key[0],
             "scale": key[1],
@@ -973,9 +1230,22 @@ def build_comparisons(
             "mode": key[4],
             "attempted_pairs": str(len(pair_values)),
             "successful_pairs": str(successful_pairs),
-            "failed_pairs": str(len(pair_values) - successful_pairs),
+            "failed_pairs": str(
+                len(pair_values)
+                - successful_pairs
+                - noncomparable_pairs
+            ),
             "correctness_status": "fail" if unique_issues else "pass",
             "issues": " | ".join(unique_issues),
+            "comparability_status": (
+                "not_comparable"
+                if noncomparable_pairs
+                else "comparable"
+            ),
+            "comparability_issues": " | ".join(
+                unique_comparability_issues
+            ),
+            "noncomparable_pairs": str(noncomparable_pairs),
         }
         for metric in COMPARISON_METRICS:
             values = metric_values[metric]
@@ -1038,13 +1308,25 @@ def write_correctness(
             cell = cells[key]
             unique_issues = list(dict.fromkeys(cell.issues))
             row = dict(zip(GROUP_FIELDS, key))
-            row.update(
-                {
-                    "correctness_status": "fail" if unique_issues else "pass",
-                    "issue_count": str(len(unique_issues)),
-                    "issues": " | ".join(unique_issues),
-                }
+            row["correctness_status"] = (
+                "fail" if unique_issues else "pass"
             )
+            for field in (
+                EXTERNAL_DIRECTIONAL_ORACLE_GATE_PASS,
+                *EXTERNAL_DUMI_ORACLE_REQUIRED_FIELDS,
+                *EXTERNAL_DIRECTIONAL_DIAGNOSTIC_FIELDS,
+                EXTERNAL_DIRECTIONAL_ORACLE_RECEIPT,
+            ):
+                values = sorted(
+                    {
+                        source.get(field, "")
+                        for source in cell.rows
+                        if source.get(field, "")
+                    }
+                )
+                row[field] = ",".join(values)
+            row["issue_count"] = str(len(unique_issues))
+            row["issues"] = " | ".join(unique_issues)
             writer.writerow(row)
     finally:
         if should_close:
@@ -1098,19 +1380,14 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--design-tsv",
         help=(
-            "planned raw/ready rows; require an exact match on run_id, workload, "
-            "scale, stage, implementation, mode, repetition, and order"
+            "planned measured-stage rows; require an exact match on run_id, "
+            "workload, scale, stage, implementation, mode, repetition, and order"
         ),
     )
     parser.add_argument(
         "--expected-repetitions",
         type=int,
         help="require exactly this many attempts in every summarized cell",
-    )
-    parser.add_argument(
-        "--no-derived",
-        action="store_true",
-        help="do not derive the raw_plus_ready end-to-end stage",
     )
     return parser.parse_args()
 
@@ -1180,8 +1457,6 @@ def main() -> int:
                     f"design is not a regular file: {design_path}"
                 )
             design_issues = apply_design(rows, read_design(design_path))
-        if not arguments.no_derived:
-            rows = add_raw_plus_ready(rows)
         cells = group_cells(rows)
         correctness_issues = check_correctness(
             rows,
@@ -1189,7 +1464,7 @@ def main() -> int:
             arguments.expected_repetitions,
         )
         summaries = [summarize_cell(cells[key]) for key in sorted(cells)]
-        comparisons, comparison_issues = build_comparisons(rows)
+        comparisons, comparison_issues = build_comparisons(rows, cells)
         write_summary(summaries, arguments.output)
         write_correctness(cells, arguments.correctness_output)
         write_comparisons(comparisons, arguments.comparisons_output)

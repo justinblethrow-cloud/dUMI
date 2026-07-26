@@ -62,12 +62,20 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
 
       - name: Set up Java
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
+
+      - name: Install samtools for external-BAM tests
+        if: matrix.os == 'ubuntu-24.04' && matrix.java == '11'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes samtools
 
       - name: Build and verify
         run: ./scripts/check.sh

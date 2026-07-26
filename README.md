@@ -289,7 +289,11 @@ Measured comparisons with canonical upstream, including exact commits,
 workloads, repetition counts, runtime settings, output-equivalence checks, and
 limitations, are recorded in [Performance](docs/PERFORMANCE.md). The small
 [`benchmark-streaming.sh`](scripts/benchmark-streaming.sh) harness is a local
-on/off regression signal, not a production-wide performance claim.
+on/off regression signal, not a production-wide performance claim. The
+[reproducible benchmark harness](scripts/benchmark/README.md) also supports
+privacy-hardened, manifest-driven replication on representative external BAMs;
+its full external evidence bundles remain restricted and require deliberate
+curation before any public release.
 
 ## Documentation
 

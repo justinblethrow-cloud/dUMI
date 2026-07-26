@@ -5,6 +5,9 @@
 /test-output/
 /test/example/
 /.tools/
+/.local/
 /umicollapse.jar
 __pycache__/
 *.py[cod]
+.DS_Store
+._*
